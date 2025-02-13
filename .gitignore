@@ -1,2 +1,14 @@
 raw_data/
 .env
+
+# Jupiter Notebook #
+.pytest_cache
+__pycache__
+*checkpoint.ipynb
+*.ipynb_checkpoints
+
+# databases #
+*.csv
+*.gz
+*.zip
+*.sqlite
