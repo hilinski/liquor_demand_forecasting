@@ -1,5 +1,6 @@
 raw_data/
 .env
+liquor_app.egg-info/
 
 # Jupiter Notebook #
 .pytest_cache
@@ -12,3 +13,4 @@ __pycache__
 *.gz
 *.zip
 *.sqlite
+*.Identifier
