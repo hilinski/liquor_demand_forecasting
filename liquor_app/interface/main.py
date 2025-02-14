@@ -16,6 +16,7 @@ def preprocess(*args) -> None:
                 select *
                 from `bigquery-public-data.iowa_liquor_sales.sales`
                 where date <= '2023-03-31' and date >= '2023-01-01'
+                and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
              """
     data = get_data_with_cache(gcp_project = GCP_PUBLIC_DATA,
         query = query,
