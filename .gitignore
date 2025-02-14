@@ -1,6 +1,7 @@
 raw_data/
 .env
 liquor_app.egg-info/
+build/
 
 # Jupiter Notebook #
 .pytest_cache
