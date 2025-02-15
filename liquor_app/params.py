@@ -1,0 +1,11 @@
+import os
+
+# ACA VAN LAS CLAVES/ACCESOS, DEFINICIONES DE FLUJO, ETC
+#VARIABLE EN MAYUSCULA
+##################  VARIABLES  ##################
+GCP_PUBLIC_DATA = os.environ.get("GCP_PUBLIC_DATA")
+MODEL_TARGET = os.environ.get("MODEL_TARGET")
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI")
+MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT")
+MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME")
+RAW_DATA_PATH = '../raw_data/'

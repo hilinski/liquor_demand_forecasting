@@ -1,6 +1,0 @@
-import os
-
-# ACA VAN LAS CLAVES/ACCESOS, DEFINICIONES DE FLUJO, ETC
-#VARIABLE EN MAYUSCULA
-##################  VARIABLES  ##################
-GCP_PUBLIC_DATA = os.environ.get("GCP_PUBLIC_DATA")
