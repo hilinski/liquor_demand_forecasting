@@ -1,4 +1,4 @@
-raw_data/*
+data/*
 .env
 liquor_app.egg-info/
 build/

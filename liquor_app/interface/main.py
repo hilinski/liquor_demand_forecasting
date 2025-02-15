@@ -56,7 +56,7 @@ def preprocess(*args) -> None:
     """
 
     data = get_data_with_cache(
-        gcp_project = 'nth-fiber-448914-a7',
+        gcp_project = GCP_PUBLIC_DATA,
         query = query,
         cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
         data_has_header=True
