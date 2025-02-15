@@ -17,3 +17,6 @@ run_evaluate:
 	python -c 'from liquor_app.interface.main import evaluate; evaluate()'
 
 run_all: run_preprocess run_train run_pred run_evaluate
+
+run_api:
+	uvicorn liquor_app.api.fast:app --reload
