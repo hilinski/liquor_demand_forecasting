@@ -2,6 +2,11 @@ import math
 import numpy as np
 import pandas as pd
 
+def transform_numeric_features(X: pd.DataFrame)-> pd.DataFrame:
+    assert isinstance(X, pd.DataFrame)
+    return X[X['bottles_sold']>=0]
+
+
 def transform_time_features(X: pd.DataFrame) -> np.ndarray:
     assert isinstance(X, pd.DataFrame)
 

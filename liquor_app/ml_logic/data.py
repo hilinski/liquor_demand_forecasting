@@ -6,7 +6,13 @@ from pathlib import Path
 from liquor_app.params import *
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-    pass
+    #Get DataFrame cleaned from NaN values, negative values in sold columns
+    # and drop "county_number" empty column
+    assert isinstance(df, pd.DataFrame)
+    df = df.drop('county_number', axis=1, errors='ignore')
+    df = df.dropna(subset=['store_location','address','city','zip_code','county'])
+    df[df['bottles_sold']>=0]
+    return df
 
 def get_data_with_cache(
         gcp_project:str,
@@ -27,6 +33,7 @@ def get_data_with_cache(
         query_job = client.query(query)
         result = query_job.result()
         df = result.to_dataframe()
+
 
         # Store as CSV if the BQ query returned at least one valid line
         if df.shape[0] > 1:
