@@ -10,6 +10,12 @@ start = time.perf_counter()
 from tensorflow import keras
 from keras import Model, Sequential, layers, regularizers, optimizers
 from keras.callbacks import EarlyStopping
+from tensorflow.keras.models import Sequential
+from tensorflow.keras import layers
+from tensorflow.keras.layers import Dense, SimpleRNN, Flatten, LSTM
+from tensorflow.keras.layers import Normalization
+
+
 
 end = time.perf_counter()
 print(f"\n✅ TensorFlow loaded ({round(end - start, 2)}s)")
@@ -20,16 +26,17 @@ def initialize_model(input_shape: tuple) -> Model:
     """
     Initialize the Neural Network with random weights
     """
-    reg = regularizers.l1_l2(l2=0.005)
-
+    #ver si es necesario regularizer..
+    #reg = regularizers.l1_l2(l2=0.005)
     model = Sequential()
-    model.add(layers.Input(shape=input_shape))
-    model.add(layers.Dense(100, activation="relu", kernel_regularizer=reg))
-    model.add(layers.BatchNormalization(momentum=0.9))
-    model.add(layers.Dropout(rate=0.1))
-    model.add(layers.Dense(50, activation="relu"))
-    model.add(layers.BatchNormalization(momentum=0.9))  # use momentum=0 to only use statistic of the last seen minibatch in inference mode ("short memory"). Use 1 to average statistics of all seen batch during training histories.
-    model.add(layers.Dropout(rate=0.1))
+    #model.add(layers.Input(shape=input_shape))
+    model.add(SimpleRNN(units=2, activation='tanh', input_shape=(490356,163)))
+    model.add(layers.Dense(20, activation="linear"))#, kernel_regularizer=reg))
+    #model.add(layers.BatchNormalization(momentum=0.9))
+    #model.add(layers.Dropout(rate=0.1))
+    model.add(layers.Dense(10, activation="linear"))
+    #model.add(layers.BatchNormalization(momentum=0.9))  # use momentum=0 to only use statistic of the last seen minibatch in inference mode ("short memory"). Use 1 to average statistics of all seen batch during training histories.
+    #model.add(layers.Dropout(rate=0.1))
     model.add(layers.Dense(1, activation="linear"))
 
     print("✅ Model initialized")
