@@ -2,13 +2,17 @@ import numpy as np
 import pandas as pd
 import pdb
 
+import os
+import sys
+sys.path.append(os.path.abspath(".."))
+
 from pathlib import Path
 from dateutil.parser import parse
 
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features
+from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
 def preprocess(*args) -> None:
@@ -93,6 +97,7 @@ def preprocess(*args) -> None:
     print(f"✅ Raw data saved as {RAW_DATA_PATH}")
     print(f"✅ Processed data saved as {PROCESSED_DATA_PATH}")
     print("✅ preprocess() done")
+    return data_processed
 
 
 def train(min_date:str = '2023-01-01',
@@ -157,14 +162,6 @@ def train(min_date:str = '2023-01-01',
     print(f"{X_train.shape[1:]=}")
     # Train model using `model.py`
 
-    # crear secuencias de RNN
-    def crear_secuencias(X, y, pasos=10):
-        X, y = np.array(X), np.array(y)  # Convertir a arrays NumPy si aún no lo son
-        secuencias_X = np.array([X[i:i+pasos] for i in range(len(X) - pasos)])
-        secuencias_y = np.array([y[i+pasos] for i in range(len(y) - pasos)])
-
-        return np.array(secuencias_X), np.array(secuencias_y)
-
     print(f"creando secuencias train para modelo RNN...")
     X_train_rnn, y_train_rnn = crear_secuencias(X_train, y_train, pasos=10)
     print(f"creando secuencias val para modelo RNN...")
@@ -202,10 +199,33 @@ def evaluate(*args) -> float:
     pass
 
 def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
-    pass
+
+    if X_pred is None:
+        print(f"cargando datos dummy para X_pred")
+        data = get_data_with_cache(GCP_PUBLIC_DATA,
+        query = 'hi',
+        cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
+        data_has_header=True
+        )
+        data = data.iloc[-20:, :]
+        print(f"{data.shape}")
+        X_pred = data.drop(['bottles_sold'], axis=1)
+        X_pred, X_pred2 = crear_secuencias(X_pred, X_pred, pasos=10)
+        print(f"{X_pred}")
+
+    print(f"cargando modelo")
+    model = load_model()
+    assert model is not None
+    print(f"modelo cargado")
+
+    print(f"predicting X_pred")
+    y_pred = model.predict(X_pred)
+
+    print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
+    return y_pred
 
 if __name__ == '__main__':
     #preprocess()
-    train()
+    #train()
     #evaluate()
-    #pred()
+    pred()
