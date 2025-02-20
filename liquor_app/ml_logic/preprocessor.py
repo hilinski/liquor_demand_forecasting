@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pickle
 
 import datetime
 
@@ -14,10 +15,11 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
     #preprocesamiento de fechas
     print('preprocessing dates...')
-    X['date'] = pd.to_datetime(X['date'])
-    X['date_ordinal'] = X['date'].apply(lambda x: x.toordinal())
-    X.drop(['date'], axis=1, inplace=True)
-    print('preprocessin dates ok, now the rest..')
+    if is_train:
+        X['date'] = pd.to_datetime(X['date'])
+        X['date_ordinal'] = X['date'].apply(lambda x: x.toordinal())
+        X.drop(['date'], axis=1, inplace=True, errors= 'ignore')
+        print('preprocessin dates ok, now the rest..')
 
     def create_sklearn_preprocessor() -> ColumnTransformer:
         """
@@ -57,9 +59,13 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
     if is_train:
         X_processed = preprocessor.fit_transform(X)
-
+        # Guardar el preprocesador en un archivo
+        with open("preprocessor.pkl", "wb") as f:
+            pickle.dump(preprocessor, f)
 
     else:
+        with open("preprocessor.pkl", "rb") as f:
+            preprocessor = pickle.load(f)
         X_processed = preprocessor.transform(X)
 
     col_names = preprocessor.get_feature_names_out()
@@ -67,3 +73,11 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
     print(f'col_names from preprocessing before joins: {col_names}')
 
     return X_processed,col_names
+
+
+# crear secuencias de RNN
+def crear_secuencias(X, y, pasos=10):
+    X, y = np.array(X), np.array(y)  # Convertir a arrays NumPy si aún no lo son
+    secuencias_X = np.array([X[i:i+pasos] for i in range(len(X) - pasos)])
+    secuencias_y = np.array([y[i+pasos] for i in range(len(y) - pasos)])
+    return np.array(secuencias_X), np.array(secuencias_y)
