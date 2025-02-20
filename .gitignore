@@ -3,6 +3,7 @@ data/*
 liquor_app.egg-info/
 build/
 !.gitkeep
+model/*
 
 # Jupiter Notebook #
 .pytest_cache

@@ -100,7 +100,7 @@ def train(min_date:str = '2023-01-01',
         split_ratio: float = 0.10, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
         batch_size = 256,
-        patience = 2
+        patience = 5
     ) -> float:
 
     """
@@ -130,6 +130,9 @@ def train(min_date:str = '2023-01-01',
         data_has_header=True
     )
 
+    #tomar solo 10% de la data
+    data = data.sample(frac=0.1, random_state=42)  # Tomar solo el 10% de los datos
+
     # Create (X_train_processed, y_train, X_val_processed, y_val)
     train_length = int(len(data) * (1 - split_ratio))
 
@@ -152,17 +155,30 @@ def train(min_date:str = '2023-01-01',
     # Luckily, our preprocessor is stateless: we can `fit_transform` both X_train and X_val without data leakage!
     print(f"{X_train.shape=}")
     print(f"{X_train.shape[1:]=}")
-    print(f"{X_train.columns}")
-    print(f"{X_train.dtypes}")
     # Train model using `model.py`
-    model = initialize_model(input_shape=X_train.shape[1:])
+
+    # crear secuencias de RNN
+    def crear_secuencias(X, y, pasos=10):
+        X, y = np.array(X), np.array(y)  # Convertir a arrays NumPy si aún no lo son
+        secuencias_X = np.array([X[i:i+pasos] for i in range(len(X) - pasos)])
+        secuencias_y = np.array([y[i+pasos] for i in range(len(y) - pasos)])
+
+        return np.array(secuencias_X), np.array(secuencias_y)
+
+    print(f"creando secuencias train para modelo RNN...")
+    X_train_rnn, y_train_rnn = crear_secuencias(X_train, y_train, pasos=10)
+    print(f"creando secuencias val para modelo RNN...")
+    X_val_rnn, y_val_rnn = crear_secuencias(X_val, y_val, pasos=10)
+
+    print(f"inicializando modelo")
+    model = initialize_model(input_shape=X_train_rnn.shape[1:])
     model = compile_model(model, learning_rate=learning_rate)
 
     model, history = train_model(
-        model, X_train, y_train,
+        model, X_train_rnn, y_train_rnn,
         batch_size=batch_size,
         patience=patience,
-        validation_data=(X_val, y_val)
+        validation_data=(X_val_rnn, y_val_rnn)
     )
 
     val_mae = np.min(history.history['val_mae'])

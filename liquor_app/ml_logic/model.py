@@ -28,7 +28,6 @@ def initialize_model(input_shape: tuple) -> Model:
     """
     #ver si es necesario regularizer..
     #reg = regularizers.l1_l2(l2=0.005)
-
     model = Sequential()
     #model.add(layers.Input(shape=input_shape))
     model.add(SimpleRNN(units=2, activation='tanh', input_shape=(490356,163)))
