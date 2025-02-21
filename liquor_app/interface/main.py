@@ -90,7 +90,7 @@ def preprocess(*args) -> None:
 
     # Process data
     X = data_clean.drop(['pack', 'bottle_volume_ml', 'state_bottle_cost', 'state_bottle_retail',
-    'bottles_sold', 'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1)
+    'bottles_sold', 'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1, errors='ignore')
     #dates = data_clean[['date']]
     y = data_clean[['bottles_sold']]
     X_processed,col_names = preprocess_features(X,True)
