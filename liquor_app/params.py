@@ -12,3 +12,6 @@ MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME")
 ROOT_DIR = Path(__file__).parent.parent
 RAW_DATA_PATH = Path(ROOT_DIR).joinpath("raw")
 PROCESSED_DATA_PATH = Path(ROOT_DIR).joinpath("data","processed")
+
+BUCKET_NAME = os.environ.get("BUCKET_NAME")
+MODEL_LOCAL_PATH = Path(ROOT_DIR).joinpath("model")
