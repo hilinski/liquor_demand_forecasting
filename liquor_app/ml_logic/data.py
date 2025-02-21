@@ -23,6 +23,7 @@ def get_data_with_cache(
     Retrieve `query` data from BigQuery, or from `cache_path` if the file exists
     Store at `cache_path` if retrieved from BigQuery for future use
     """
+    print(cache_path)
     if cache_path.is_file():
         print("\nLoad data from local CSV...")
         df = pd.read_csv(cache_path, header='infer' if data_has_header else None)

@@ -75,6 +75,7 @@ def preprocess(*args) -> None:
         *
         from group_and_others
     """
+    print(RAW_DATA_PATH)
 
     data = get_data_with_cache(
         gcp_project = GCP_PUBLIC_DATA,
@@ -241,7 +242,7 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
     return y_pred
 
 if __name__ == '__main__':
-    #preprocess()
+    preprocess()
     #train()
     #evaluate()
-    pred()
+    #pred()
