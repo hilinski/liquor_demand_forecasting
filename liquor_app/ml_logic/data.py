@@ -9,8 +9,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     #Get DataFrame cleaned from NaN values, negative values in sold columns
     # and drop "county_number" empty column
     assert isinstance(df, pd.DataFrame)
-    df = df.drop('county_number', axis=1, errors='ignore')
-    df = df.dropna(subset=['store_location','address','city','zip_code','county'])
+    df = df.drop(['invoice_and_item_number','store_name','store_number','vendor_number','category','address','city','zip_code','item_number','item_description','store_location'], axis=1, errors='ignore')
     df[df['bottles_sold']>=0]
     return df
 

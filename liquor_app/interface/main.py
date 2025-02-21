@@ -2,13 +2,18 @@ import numpy as np
 import pandas as pd
 import pdb
 
+import os
+import sys
+sys.path.append(os.path.abspath(".."))
+
 from pathlib import Path
+from dateutil.parser import parse
 
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features
-from liquor_app.ml_logic.registry import load_model, save_model, save_results
+from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias
+from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
 def preprocess(*args) -> None:
     query = """
@@ -82,13 +87,13 @@ def preprocess(*args) -> None:
     # # DATA_CLEAN = CLEAN_DATA(DATA)
     # # PRINT("✅ DATA CLEANED ")
 
-    # # # PROCESS DATA
-    # # X = DATA_CLEAN.DROP(['PACK', 'BOTTLE_VOLUME_ML', 'STATE_BOTTLE_COST', 'STATE_BOTTLE_RETAIL',
-    # # 'BOTTLES_SOLD', 'SALE_DOLLARS', 'VOLUME_SOLD_LITERS','VOLUME_SOLD_GALLONS'], AXIS=1)
-    # # DATES = DATA_CLEAN[['DATE']]
-    # # Y = DATA_CLEAN[['BOTTLES_SOLD']]
-    # # X_PROCESSED,COL_NAMES = PREPROCESS_FEATURES(X,TRUE)
-    # # PRINT("✅ DATA PROCCESED ")
+    # Process data
+    X = data_clean.drop(['pack', 'bottle_volume_ml', 'state_bottle_cost', 'state_bottle_retail',
+    'bottles_sold', 'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1)
+    #dates = data_clean[['date']]
+    y = data_clean[['bottles_sold']]
+    X_processed,col_names = preprocess_features(X,True)
+    print("✅ Data Proccesed ")
 
     # # # LOAD A DATAFRAME ONTO BIGQUERY CONTAINING [PICKUP_DATETIME, X_PROCESSED, Y]
     # # # USING DATA.LOAD_DATA_TO_BQ()
@@ -99,27 +104,144 @@ def preprocess(*args) -> None:
     # #     COLUMNS=COL_NAMES
     # # )
 
-    # # DATA_PROCESSED = PD.CONCAT([DATES, X_PROCESSED_DF, Y], AXIS="COLUMNS", SORT=FALSE)
-    # # #DATA_PROCESSED = PD.DATAFRAME(NP.CONCATENATE((DATES, X_PROCESSED, Y), AXIS=1))
-    # # PROCESSED_PATH = PATH(PROCESSED_DATA_PATH).JOINPATH("DATA_PROCESSED.CSV")
-    # # DATA_PROCESSED.TO_CSV(PROCESSED_PATH, HEADER=TRUE, INDEX=FALSE)
+    data_processed = pd.concat([X_processed_df, y], axis="columns", sort=False)
+    data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
+    #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+    processed_path = Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv")
+    data_processed.to_csv(processed_path, header=True, index=False)
 
     print(f"✅ Raw data saved as {RAW_DATA_PATH}")
     print(f"✅ Processed data saved as {PROCESSED_DATA_PATH}")
     print("✅ preprocess() done")
+    return data_processed
 
 
-def train(*args) -> float:
-    pass
+def train(min_date:str = '2023-01-01',
+        max_date:str = '2023-03-31',
+        split_ratio: float = 0.10, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
+        learning_rate=0.0005,
+        batch_size = 256,
+        patience = 5
+    ) -> float:
+
+    """
+    - Download processed data from your BQ table (or from cache if it exists)
+    - Train on the preprocessed dataset (which should be ordered by date)
+    - Store training results and model weights
+
+    Return val_mae as a float
+    """
+
+    print("\n⭐️ Use case: train")
+    print( "\nLoading preprocessed validation data...")
+
+    min_date = parse(min_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+    max_date = parse(max_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+
+    # Load processed data using `get_data_with_cache` in chronological order
+    # Try it out manually on console.cloud.google.com first!
+
+    query = f"""
+        SELECT 'hello world'
+        """
+
+    data = get_data_with_cache(GCP_PUBLIC_DATA,
+        query,
+        cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
+        data_has_header=True
+    )
+
+    #tomar solo 10% de la data
+    data = data.sample(frac=0.1, random_state=42)  # Tomar solo el 10% de los datos
+
+    # Create (X_train_processed, y_train, X_val_processed, y_val)
+    train_length = int(len(data) * (1 - split_ratio))
+
+    data_train = data.iloc[:train_length, :].sample(frac=1)
+    data_val = data.iloc[train_length:, :].sample(frac=1)
+
+    #X_train = data_train.drop(["fare_amount","pickup_datetime"], axis=1)
+    #y_train = data_train[["fare_amount"]]
+
+    X_train = data_train.drop(['bottles_sold'], axis=1)
+    y_train = data_train[["bottles_sold"]]
+
+    #X_val = data_val.drop(["fare_amount","pickup_datetime"], axis=1)
+    #y_val = data_val[["fare_amount"]]
+
+    X_val = data_val.drop(['bottles_sold'], axis=1)
+    y_val = data_val[['bottles_sold']]
+
+    # Create (X_train_processed, X_val_processed) using `preprocessor.py`
+    # Luckily, our preprocessor is stateless: we can `fit_transform` both X_train and X_val without data leakage!
+    print(f"{X_train.shape=}")
+    print(f"{X_train.shape[1:]=}")
+    # Train model using `model.py`
+
+    print(f"creando secuencias train para modelo RNN...")
+    X_train_rnn, y_train_rnn = crear_secuencias(X_train, y_train, pasos=10)
+    print(f"creando secuencias val para modelo RNN...")
+    X_val_rnn, y_val_rnn = crear_secuencias(X_val, y_val, pasos=10)
+
+    print(f"inicializando modelo")
+    model = initialize_model(input_shape=X_train_rnn.shape[1:])
+    model = compile_model(model, learning_rate=learning_rate)
+
+    model, history = train_model(
+        model, X_train_rnn, y_train_rnn,
+        batch_size=batch_size,
+        patience=patience,
+        validation_data=(X_val_rnn, y_val_rnn)
+    )
+
+    val_mae = np.min(history.history['val_mae'])
+
+    params = dict(
+        context="train",
+        row_count=len(X_train),
+    )
+
+    # Save results on the hard drive using taxifare.ml_logic.registry
+    #save_results(params=params, metrics=dict(mae=val_mae))
+
+    # Save model weight on the hard drive (and optionally on GCS too!)
+    save_model(model=model)
+
+    print("✅ train() done \n")
+
+    return val_mae
 
 def evaluate(*args) -> float:
     pass
 
 def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
-    pass
+
+    if X_pred is None:
+        print(f"cargando datos dummy para X_pred")
+        data = get_data_with_cache(GCP_PUBLIC_DATA,
+        query = 'hi',
+        cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
+        data_has_header=True
+        )
+        data = data.iloc[-20:, :]
+        print(f"{data.shape}")
+        X_pred = data.drop(['bottles_sold'], axis=1)
+        X_pred, X_pred2 = crear_secuencias(X_pred, X_pred, pasos=10)
+        print(f"{X_pred}")
+
+    print(f"cargando modelo")
+    model = load_model()
+    assert model is not None
+    print(f"modelo cargado")
+
+    print(f"predicting X_pred")
+    y_pred = model.predict(X_pred)
+
+    print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
+    return y_pred
 
 if __name__ == '__main__':
-    preprocess()
+    #preprocess()
     #train()
     #evaluate()
-    #pred()
+    pred()
