@@ -12,7 +12,7 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias, create_sequences
+from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
 def get_data(min_date='2013-01-01', max_date='2023-06-30'):
@@ -131,6 +131,7 @@ def preprocess(data) -> None:
     )
 
     data_processed = pd.concat([data_processed, columnas_apoyo, columnas_target], axis="columns", sort=False)
+    data_processed.columns = data_processed.columns.str.replace(" ", "_")
     # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
     # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
 
@@ -162,8 +163,8 @@ def train(min_date:str = '2023-01-01',
     print("\n⭐️ Use case: train")
     print( "\nLoading preprocessed validation data...")
 
-    min_date = parse(min_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
-    max_date = parse(max_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+    #min_date = parse(min_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+    #max_date = parse(max_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
 
     # Load processed data using `get_data_with_cache` in chronological order
     # Try it out manually on console.cloud.google.com first!
@@ -186,7 +187,7 @@ def train(min_date:str = '2023-01-01',
     data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns)+1)]
 
     print(f"creando secuencias para modelo RNN...")
-    X, y = create_sequences(data_preproc,columnas_apoyo, columnas_target, past_steps=52, future_steps=12)
+    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=12)
     print("✅ Secuencias creadas ")
 
     split_index = int((1-split_ratio) * len(X))
@@ -195,8 +196,10 @@ def train(min_date:str = '2023-01-01',
     print("✅ Train/Val Split created ")
 
     print("Input shape X train completo:", X_train.shape)
+    print("Input shape y train completo:", y_train.shape)
     print("Input shape X train[1:]:", X_train.shape[1:])
     print("Input shape X val completo:", X_val.shape)
+
 
     print(X_train.dtype)
     print(type(X_train))

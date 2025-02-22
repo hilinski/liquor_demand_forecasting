@@ -73,17 +73,25 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
     return X_processed,col_names
 
 # crear secuencias de RNN
-def crear_secuencias(X, y, pasos=10):
-    X, y = np.array(X), np.array(y)  # Convertir a arrays NumPy si aún no lo son
-    secuencias_X = np.array([X[i:i+pasos] for i in range(len(X) - pasos)])
-    secuencias_y = np.array([y[i+pasos] for i in range(len(y) - pasos)])
-    return np.array(secuencias_X), np.array(secuencias_y)
-
-# crear secuencias de RNN
-def create_sequences(df, columnas_apoyo, columnas_target, past_steps=10, future_steps=1):
-    assert len(df) == len(columnas_target) and len(df) == len(columnas_apoyo)
+def create_sequences(df, past_steps=10, future_steps=1):
     X, y = [], []
+    df_x = df.drop(['bottles_sold'],axis='columns').copy()
+    df_y = df[["bottles_sold"]].copy()
     for i in range(len(df) - past_steps - future_steps):
-        X.append(df.iloc[i : i + past_steps].values)  # Past data
-        y.append([columnas_target.iloc[i + past_steps : i + past_steps + future_steps]["bottles_sold"].values])  # Future target
+        X.append(df_x.iloc[i : i + past_steps].values)  # Past data
+        y.append(df_y.iloc[i + past_steps : i + past_steps + future_steps]["bottles_sold"].values)  # Future target
+    return np.array(X), np.array(y)
+
+def create_sequences_padre(data_preproc, columnas_target, past_steps=10, future_steps=1):
+    assert len(data_preproc) == len(columnas_target)
+    df = pd.concat([data_preproc,columnas_target], axis='columns')
+    X, y = [], []
+    for county in data_preproc.iloc[:,data_preproc.columns.str.contains('cat_preproc__county_')].columns:
+        for cat_prod in data_preproc.iloc[:,data_preproc.columns.str.contains('cat_preproc__category_name_')].columns:
+            df_filtrado = df.query(f"{county} == 1 and {cat_prod} == 1")
+            X_sequence, y_sequence = create_sequences(df_filtrado,past_steps,future_steps)
+            for x_item in X_sequence:
+                X.append(x_item)
+            for y_item in y_sequence:
+                y.append([y_item])
     return np.array(X), np.array(y)
