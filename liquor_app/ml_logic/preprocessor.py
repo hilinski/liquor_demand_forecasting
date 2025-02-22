@@ -80,9 +80,10 @@ def crear_secuencias(X, y, pasos=10):
     return np.array(secuencias_X), np.array(secuencias_y)
 
 # crear secuencias de RNN
-def create_sequences(df, past_steps=10, future_steps=1):
+def create_sequences(df, columnas_apoyo, columnas_target, past_steps=10, future_steps=1):
+    assert len(df) == len(columnas_target) and len(df) == len(columnas_apoyo)
     X, y = [], []
     for i in range(len(df) - past_steps - future_steps):
         X.append(df.iloc[i : i + past_steps].values)  # Past data
-        y.append(df.iloc[i + past_steps : i + past_steps + future_steps]["num_preproc__bottles_sold"].values)  # Future target
+        y.append([columnas_target.iloc[i + past_steps : i + past_steps + future_steps]["bottles_sold"].values])  # Future target
     return np.array(X), np.array(y)
