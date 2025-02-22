@@ -24,31 +24,31 @@ def preprocess(*args) -> None:
             CAST(category AS NUMERIC) as category,
             CAST(vendor_number AS NUMERIC) as vendor_number
             from `bigquery-public-data.iowa_liquor_sales.sales`
-            where date <= '2023-03-31' and date >= '2023-01-01'
-            and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
+            where date <= '2023-03-31' and date >= '2020-01-01'
+            --and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
             ORDER BY date ASC
         ),
         distinct_vendor as (
             select
                 CAST(vendor_number AS NUMERIC) as vendor_number,
-                ARRAY_AGG(vendor_name ORDER BY date DESC LIMIT 1) as vendor_name
+                ARRAY_TO_STRING(ARRAY_AGG(vendor_name ORDER BY date DESC LIMIT 1),"") as vendor_name
             from `bigquery-public-data.iowa_liquor_sales.sales`
             group by 1
         ),
         distinct_category as (
             select
                 CAST(category AS NUMERIC) as category,
-                ARRAY_AGG(category_name ORDER BY date DESC LIMIT 1) as category_name
+                ARRAY_TO_STRING(ARRAY_AGG(category_name ORDER BY date DESC LIMIT 1),"") as category_name
             from `bigquery-public-data.iowa_liquor_sales.sales`
             group by 1
         ),
         distinct_store as (
             select
                 CAST(store_number AS NUMERIC) as store_number,
-                ARRAY_AGG(store_name ORDER BY date DESC LIMIT 1) as store_name
+                ARRAY_TO_STRING(ARRAY_AGG(store_name ORDER BY date DESC LIMIT 1),"") as store_name
             from `bigquery-public-data.iowa_liquor_sales.sales`
             group by 1
-        )
+        ), clean_data2 as (
         select
             cd.* EXCEPT (vendor_name, category_name, store_name),
             dv.vendor_name,
@@ -58,6 +58,22 @@ def preprocess(*args) -> None:
         left join distinct_vendor dv on cd.vendor_number = dv.vendor_number
         left join distinct_category dc on cd.category = dc.category
         left join distinct_store ds on cd.store_number = ds.store_number
+        ), group_and_others as (
+        SELECT date,
+        case when county in ('POLK','LINN','SCOTT','BLACK HAWK','JOHNSON','POTTAWATTAMIE','DUBUQUE','STORY','WOODBURY','DALLAS') then county else 'OTHER' END AS county,
+        case when category_name in ('WHITE RUM','IMPORTED VODKAS','PUERTO RICO & VIRGIN ISLANDS RUM','FLAVORED RUM','100% AGAVE TEQUILA','IMPORTED DRY GINS','SCOTCH WHISKIES','IMPORTED CORDIALS & LIQUEURS','GOLD RUM','SPICED RUM') then category_name else 'OTHER' END AS category_name,
+        case when vendor_name in ('SAZERAC COMPANY  INC','DIAGEO AMERICAS','HEAVEN HILL BRANDS','LUXCO INC','JIM BEAM BRANDS','FIFTH GENERATION INC','PERNOD RICARD USA','MCCORMICK DISTILLING CO.','BACARDI USA INC','E & J GALLO WINERY') then vendor_name else 'OTHER' END as vendor_name,
+        sum(bottles_sold) as bottles_sold
+        FROM clean_data2
+        group by 1,2,3,4
+        )
+        select extract(YEAR FROM date) as year,
+        extract(MONTH FROM date) as month,
+        extract(DAY FROM date) as day,
+        extract(DAYOFWEEK FROM date) as dow,
+        extract(WEEK from date) as week,
+        *
+        from group_and_others
     """
 
     data = get_data_with_cache(
@@ -73,7 +89,7 @@ def preprocess(*args) -> None:
 
     # Process data
     X = data_clean.drop(['pack', 'bottle_volume_ml', 'state_bottle_cost', 'state_bottle_retail',
-    'bottles_sold', 'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1)
+    'bottles_sold', 'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1, errors='ignore')
     #dates = data_clean[['date']]
     y = data_clean[['bottles_sold']]
     X_processed,col_names = preprocess_features(X,True)
