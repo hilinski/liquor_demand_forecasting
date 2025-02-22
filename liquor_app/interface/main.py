@@ -77,7 +77,7 @@ def preprocess(*args) -> None:
     """
     print(RAW_DATA_PATH)
 
-    data = get_data_with_cache(
+    data_clean = get_data_with_cache(
         gcp_project = GCP_PUBLIC_DATA,
         query = query,
         cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
