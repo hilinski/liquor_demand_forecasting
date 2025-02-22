@@ -27,7 +27,9 @@ def initialize_model(input_shape: tuple) -> Model:
     #reg = regularizers.l1_l2(l2=0.005)
     model = Sequential()
     #model.add(layers.Input(shape=input_shape))
-    model.add(SimpleRNN(units=2, activation='tanh', input_shape= input_shape)) #(490356,163)))
+
+    model.add(SimpleRNN(units=10, activation='tanh', return_sequences = True, input_shape=input_shape))
+
     model.add(layers.Dense(20, activation="linear"))#, kernel_regularizer=reg))
     #model.add(layers.BatchNormalization(momentum=0.9))
     #model.add(layers.Dropout(rate=0.1))
