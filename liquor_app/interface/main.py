@@ -12,7 +12,7 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias
+from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias, create_sequences
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
 def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
@@ -109,29 +109,22 @@ def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
         data_has_header=True
     )
 
-    # Clean data
-    data_clean = clean_data(data)
-    print("✅ Data cleaned ")
 
-    # Process data
-    X = data_clean.drop(['pack', 'bottle_volume_ml', 'state_bottle_cost', 'state_bottle_retail',
-                         'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1, errors='ignore')
-    y = data_clean[['bottles_sold']]
-    X_processed,col_names = preprocess_features(X,True)
+    data_processed,col_names = preprocess_features(data,True)
     print("✅ Data Proccesed ")
 
     # Load a DataFrame onto BigQuery containing [pickup_datetime, X_processed, y]
     # using data.load_data_to_bq()
 
-
-    X_processed_df = pd.DataFrame(
-        X_processed,
+    data_processed = pd.DataFrame(
+        data_processed,
         columns=col_names
     )
 
-    data_processed = pd.concat([X_processed_df, y], axis="columns", sort=False)
-    data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
-    #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+    # data_processed = pd.concat([X_processed_df, y], axis="columns", sort=False)
+    # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
+    # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+
     processed_path = Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv")
     data_processed.to_csv(processed_path, header=True, index=False)
 
@@ -143,7 +136,7 @@ def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
 
 def train(min_date:str = '2023-01-01',
         max_date:str = '2023-03-31',
-        split_ratio: float = 0.10, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
+        split_ratio: float = 0.20, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
         batch_size = 256,
         patience = 5
@@ -177,45 +170,37 @@ def train(min_date:str = '2023-01-01',
     )
 
     #tomar solo 10% de la data
-    data = data.sample(frac=0.1, random_state=42)  # Tomar solo el 10% de los datos
+    #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
 
-    # Create (X_train_processed, y_train, X_val_processed, y_val)
-    train_length = int(len(data) * (1 - split_ratio))
+    data = data.iloc[:,:-1]
+    print(f"creando secuencias para modelo RNN...")
+    X, y = create_sequences(data, past_steps=4, future_steps=1)
+    print("✅ Secuencias creadas ")
 
-    data_train = data.iloc[:train_length, :].sample(frac=1)
-    data_val = data.iloc[train_length:, :].sample(frac=1)
+    split_index = int((1-split_ratio) * len(X))
+    X_train, X_val = X[:split_index], X[split_index:]
+    y_train, y_val = y[:split_index], y[split_index:]
+    print("✅ Train/Val Split created ")
 
-    X_train = data_train.drop(['bottles_sold'], axis=1)
-    y_train = data_train[["bottles_sold"]]
+    print("Input shape X train completo:", X_train.shape)
+    print("Input shape X train[1:]:", X_train.shape[1:])
 
-    X_val = data_val.drop(['bottles_sold'], axis=1)
-    y_val = data_val[['bottles_sold']]
-
-    # Create (X_train_processed, X_val_processed) using `preprocessor.py`
-    # Luckily, our preprocessor is stateless: we can `fit_transform` both X_train and X_val without data leakage!
-    print(f"{X_train.shape=}")
-    print(f"{X_train.shape[1:]=}")
-    # Train model using `model.py`
-
-    print(f"creando secuencias train para modelo RNN...")
-    X_train_rnn, y_train_rnn = crear_secuencias(X_train, y_train, pasos=10)
-    print(f"creando secuencias val para modelo RNN...")
-    X_val_rnn, y_val_rnn = crear_secuencias(X_val, y_val, pasos=10)
+    print(X_train.dtype)
+    print(type(X_train))
 
     print(f"inicializando modelo")
-    print("Shape Train RNN con secuencia general:", X_train_rnn.shape)
-    print("Shape Train RNN con secuencia filtrado:", X_train_rnn.shape[1:])
-
-    model = initialize_model(input_shape=X_train_rnn.shape[1:])
+    model = initialize_model(input_shape=X_train.shape[1:])
     model = compile_model(model, learning_rate=learning_rate)
+
+    print("✅ Model compiled succesfully")
 
     model,history = train_model(
         model,
-        X_train_rnn,
-        y_train_rnn,
+        X_train,
+        y_train,
         batch_size=batch_size,
         patience=patience,
-        validation_data=(X_val_rnn, y_val_rnn)
+        validation_data=(X_val, y_val)
     )
 
     if 'val_mae' in history.history:
@@ -225,10 +210,10 @@ def train(min_date:str = '2023-01-01',
 
     print("val_mae:", val_mae)
 
-    params = dict(
-        context="train",
-        row_count=len(X_train),
-    )
+    # params = dict(
+    #     context="train",
+    #     row_count=len(X_train),
+    # )
 
     # Save results on the hard drive using taxifare.ml_logic.registry
     #save_results(params=params, metrics=dict(mae=val_mae))
@@ -271,7 +256,7 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
     return y_pred
 
 if __name__ == '__main__':
-    preprocess()
-    #train()
+    #preprocess()
+    train()
     #evaluate()
     #pred()
