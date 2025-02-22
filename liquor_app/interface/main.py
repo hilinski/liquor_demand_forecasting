@@ -90,8 +90,7 @@ def preprocess(*args) -> None:
 
     # Process data
     X = data_clean.drop(['pack', 'bottle_volume_ml', 'state_bottle_cost', 'state_bottle_retail',
-    'bottles_sold', 'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1, errors='ignore')
-    #dates = data_clean[['date']]
+                         'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1, errors='ignore')
     y = data_clean[['bottles_sold']]
     X_processed,col_names = preprocess_features(X,True)
     print("✅ Data Proccesed ")
@@ -161,14 +160,8 @@ def train(min_date:str = '2023-01-01',
     data_train = data.iloc[:train_length, :].sample(frac=1)
     data_val = data.iloc[train_length:, :].sample(frac=1)
 
-    #X_train = data_train.drop(["fare_amount","pickup_datetime"], axis=1)
-    #y_train = data_train[["fare_amount"]]
-
     X_train = data_train.drop(['bottles_sold'], axis=1)
     y_train = data_train[["bottles_sold"]]
-
-    #X_val = data_val.drop(["fare_amount","pickup_datetime"], axis=1)
-    #y_val = data_val[["fare_amount"]]
 
     X_val = data_val.drop(['bottles_sold'], axis=1)
     y_val = data_val[['bottles_sold']]
@@ -185,17 +178,27 @@ def train(min_date:str = '2023-01-01',
     X_val_rnn, y_val_rnn = crear_secuencias(X_val, y_val, pasos=10)
 
     print(f"inicializando modelo")
+    print("Shape Train RNN con secuencia general:", X_train_rnn.shape)
+    print("Shape Train RNN con secuencia filtrado:", X_train_rnn.shape[1:])
+
     model = initialize_model(input_shape=X_train_rnn.shape[1:])
     model = compile_model(model, learning_rate=learning_rate)
 
-    model, history = train_model(
-        model, X_train_rnn, y_train_rnn,
+    model,history = train_model(
+        model,
+        X_train_rnn,
+        y_train_rnn,
         batch_size=batch_size,
         patience=patience,
         validation_data=(X_val_rnn, y_val_rnn)
     )
 
-    val_mae = np.min(history.history['val_mae'])
+    if 'val_mae' in history.history:
+        val_mae = np.min(history.history['val_mae'])
+    else:
+        val_mae = np.min(history.history['val_loss'])  # Use validation loss instead
+
+    print("val_mae:", val_mae)
 
     params = dict(
         context="train",
@@ -211,6 +214,7 @@ def train(min_date:str = '2023-01-01',
     print("✅ train() done \n")
 
     return val_mae
+
 
 def evaluate(*args) -> float:
     pass

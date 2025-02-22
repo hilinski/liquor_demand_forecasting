@@ -32,7 +32,6 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
         # CATEGORICAL PIPE
 
         categorical_features = ['county', 'category_name', 'vendor_name']
-
         cat_pipe = make_pipeline(
             OneHotEncoder(
                 handle_unknown="ignore",
@@ -40,12 +39,18 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
             )
         )
 
+        # NUMERIC PIPE
+        numerical_features = ['year','month','day','dow','week','bottles_sold']
+        num_pipe = make_pipeline(
+            RobustScaler()
+        )
         # COMBINED PREPROCESSOR
-        #("num_preproc", num_pipe,  numerical_features)
 
         final_preprocessor = ColumnTransformer(
             [
-                ("cat_preproc", cat_pipe, categorical_features)
+                ("cat_preproc", cat_pipe, categorical_features),
+                ("num_preproc", num_pipe,  numerical_features)
+
             ],
             n_jobs=-1,
             remainder='passthrough'
