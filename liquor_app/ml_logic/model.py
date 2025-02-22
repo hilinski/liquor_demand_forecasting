@@ -15,11 +15,8 @@ from tensorflow.keras import layers
 from tensorflow.keras.layers import Dense, SimpleRNN, Flatten, LSTM
 from tensorflow.keras.layers import Normalization
 
-
-
 end = time.perf_counter()
 print(f"\n✅ TensorFlow loaded ({round(end - start, 2)}s)")
-
 
 
 def initialize_model(input_shape: tuple) -> Model:
@@ -30,7 +27,9 @@ def initialize_model(input_shape: tuple) -> Model:
     #reg = regularizers.l1_l2(l2=0.005)
     model = Sequential()
     #model.add(layers.Input(shape=input_shape))
+
     model.add(SimpleRNN(units=10, activation='tanh', return_sequences = True, input_shape=input_shape))
+
     model.add(layers.Dense(20, activation="linear"))#, kernel_regularizer=reg))
     #model.add(layers.BatchNormalization(momentum=0.9))
     #model.add(layers.Dropout(rate=0.1))
