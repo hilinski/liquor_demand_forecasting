@@ -80,28 +80,25 @@ def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
         from group_and_others
         where lower(vendor_name) like '%bacardi%'
         ), combinations as (
-        SELECT *
-        FROM UNNEST(GENERATE_DATE_ARRAY('{min_date}', '{max_date}', INTERVAL 1 DAY)) as date
-        cross join (select distinct category_name from summary) a
-        cross join (select distinct county from summary) b
-        ),
-        data_combinations as (
-            select c.*,
-            date_trunc(c.date, WEEK) as date_week,
-            coalesce(s.bottles_sold,0) as bottles_sold
-            from combinations c
-            left join summary s on c.date = s.date and c.category_name = s.category_name and c.county = s.county
-        )
-        select
-            date_week,
-            category_name,
-            county,
-            extract(YEAR FROM date_week) as week_year,
-            extract(WEEK(MONDAY) from date_week) as week_of_year,
-            sum(bottles_sold) as bottles_sold
-        from data_combinations
-        group by 1,2,3,4,5
-        order by county asc, category_name asc, date_week asc
+        SELECT
+          *
+          FROM UNNEST(GENERATE_DATE_ARRAY('{min_date}', '{max_date}', INTERVAL 1 DAY)) as date
+          cross join (select distinct category_name from summary) a
+          cross join (select distinct county from summary) b
+          ), data_combinations as (
+        select c.*,
+        date_trunc(c.date, WEEK) as date_week,
+          coalesce(s.bottles_sold,0) as bottles_sold
+          from combinations c
+          left join summary s on c.date = s.date and c.category_name = s.category_name and c.county = s.county
+          )
+          select date_week, category_name, county,
+          extract(YEAR FROM date_week) as week_year,
+          extract(WEEK(MONDAY) from date_week) as week_of_year,
+           sum(bottles_sold) as bottles_sold
+           from data_combinations
+           group by 1,2,3,4,5
+           order by county asc, category_name asc, date_week asc
 
     """
 
