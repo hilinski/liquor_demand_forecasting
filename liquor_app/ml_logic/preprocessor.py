@@ -13,13 +13,7 @@ from liquor_app.ml_logic.encoders import transform_numeric_features
 
 def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
-    #preprocesamiento de fechas
-    print('preprocessing dates...')
-    if is_train:
-        X['date'] = pd.to_datetime(X['date'])
-        X['date_ordinal'] = X['date'].apply(lambda x: x.toordinal())
-        X.drop(['date'], axis=1, inplace=True, errors= 'ignore')
-        print('preprocessin dates ok, now the rest..')
+
 
     def create_sklearn_preprocessor() -> ColumnTransformer:
         """
@@ -30,8 +24,7 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
         """
 
         # CATEGORICAL PIPE
-
-        categorical_features = ['county', 'category_name', 'vendor_name']
+        categorical_features = ['county', 'category_name']
         cat_pipe = make_pipeline(
             OneHotEncoder(
                 handle_unknown="ignore",
@@ -40,7 +33,7 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
         )
 
         # NUMERIC PIPE
-        numerical_features = ['year','month','day','dow','week','bottles_sold']
+        numerical_features = ['week_year','week_of_year','bottles_sold']
         num_pipe = make_pipeline(
             RobustScaler()
         )
@@ -79,10 +72,17 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
     return X_processed,col_names
 
-
 # crear secuencias de RNN
 def crear_secuencias(X, y, pasos=10):
     X, y = np.array(X), np.array(y)  # Convertir a arrays NumPy si aún no lo son
     secuencias_X = np.array([X[i:i+pasos] for i in range(len(X) - pasos)])
     secuencias_y = np.array([y[i+pasos] for i in range(len(y) - pasos)])
     return np.array(secuencias_X), np.array(secuencias_y)
+
+# crear secuencias de RNN
+def create_sequences(df, past_steps=10, future_steps=1):
+    X, y = [], []
+    for i in range(len(df) - past_steps - future_steps):
+        X.append(df.iloc[i : i + past_steps].values)  # Past data
+        y.append(df.iloc[i + past_steps : i + past_steps + future_steps]["num_preproc__bottles_sold"].values)  # Future target
+    return np.array(X), np.array(y)
