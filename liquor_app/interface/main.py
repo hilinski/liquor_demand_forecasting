@@ -197,6 +197,8 @@ def train(min_date:str = '2023-01-01',
     print("Input shape X train completo:", X_train.shape)
     print("Input shape X train[1:]:", X_train.shape[1:])
     print("Input shape X val completo:", X_val.shape)
+    print("Input shape y train completo:",y_train.shape)
+    print("Input shape y val completo:",y_val.shape)
 
     print(X_train.dtype)
     print(type(X_train))
@@ -242,7 +244,7 @@ def train(min_date:str = '2023-01-01',
 def evaluate(*args) -> float:
     pass
 
-def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
+def pred(X_pred:np.ndarray = None) -> np.ndarray:
 
     if X_pred is None:
         print(f"cargando datos dummy para X_pred")
@@ -251,17 +253,37 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
         cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
         data_has_header=True
         )
-        data = data.iloc[-20:, :]
+        # data = data.iloc[-20:, :]
         print(f"{data.shape}")
-        X_pred = data.drop(['bottles_sold'], axis=1)
-        X_pred, X_pred2 = crear_secuencias(X_pred, X_pred, pasos=10)
-        print(f"{X_pred}")
+
+        columnas_target = data[["bottles_sold"]].copy()
+        columnas_apoyo = data[['category_name','county']].copy()
+        data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns)+1)]
+        X,y = create_sequences(data_preproc, columnas_apoyo, columnas_target, past_steps=52, future_steps=12)
+        split_ratio = 0.2
+        split_index = int((1-split_ratio) * len(X))
+        X_prep = X[split_index:]
+        y_prep = y[split_index:]
+        print("✅ Pred data created ")
+        print("X_prep shape:", X_prep.shape)
+
+        model = load_model()
+        assert model is not None
+        print(f"modelo cargado")
+
+        print(f"predicting X_pred")
+        y_pred = model.predict(X_prep)
+
+        print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
+        return y_pred
+
 
     print(f"cargando modelo")
     model = load_model()
     assert model is not None
     print(f"modelo cargado")
 
+    print("X_pred shape:", X_pred.shape)
     print(f"predicting X_pred")
     y_pred = model.predict(X_pred)
 
@@ -273,4 +295,4 @@ if __name__ == '__main__':
     preprocess(data)
     val_mae, X_val = train()
     #evaluate()
-    print(pred(X_val))
+    #print(pred())
