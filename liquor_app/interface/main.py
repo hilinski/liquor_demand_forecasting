@@ -12,68 +12,97 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias
+from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias, create_sequences
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
-def preprocess(*args) -> None:
-    query = """
+def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
+    query = f"""
         with clean_data as (
-            select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
-            CAST(store_number AS NUMERIC) as store_number ,
-            CAST(zip_code AS NUMERIC) as zip_code ,
-            CAST(category AS NUMERIC) as category,
-            CAST(vendor_number AS NUMERIC) as vendor_number
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            where date <= '2023-03-31' and date >= '2020-01-01'
-            --and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
-            ORDER BY date ASC
+                select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
+                CAST(store_number AS NUMERIC) as store_number ,
+                CAST(zip_code AS NUMERIC) as zip_code ,
+                CAST(category AS NUMERIC) as category,
+                CAST(vendor_number AS NUMERIC) as vendor_number
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                where date >= '{min_date}' and date <= '{max_date}'
+                --and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
+                ORDER BY date ASC
         ),
         distinct_vendor as (
-            select
+                select
                 CAST(vendor_number AS NUMERIC) as vendor_number,
                 ARRAY_TO_STRING(ARRAY_AGG(vendor_name ORDER BY date DESC LIMIT 1),"") as vendor_name
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            group by 1
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                group by 1
         ),
         distinct_category as (
-            select
+                select
                 CAST(category AS NUMERIC) as category,
                 ARRAY_TO_STRING(ARRAY_AGG(category_name ORDER BY date DESC LIMIT 1),"") as category_name
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            group by 1
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                group by 1
         ),
         distinct_store as (
-            select
+                select
                 CAST(store_number AS NUMERIC) as store_number,
                 ARRAY_TO_STRING(ARRAY_AGG(store_name ORDER BY date DESC LIMIT 1),"") as store_name
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            group by 1
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                group by 1
         ), clean_data2 as (
         select
-            cd.* EXCEPT (vendor_name, category_name, store_name),
-            dv.vendor_name,
-            dc.category_name,
-            ds.store_name
+                cd.* EXCEPT (vendor_name, category_name, store_name),
+                dv.vendor_name,
+                dc.category_name,
+                ds.store_name
         from clean_data cd
         left join distinct_vendor dv on cd.vendor_number = dv.vendor_number
         left join distinct_category dc on cd.category = dc.category
         left join distinct_store ds on cd.store_number = ds.store_number
         ), group_and_others as (
         SELECT date,
-        case when county in ('POLK','LINN','SCOTT','BLACK HAWK','JOHNSON','POTTAWATTAMIE','DUBUQUE','STORY','WOODBURY','DALLAS') then county else 'OTHER' END AS county,
-        case when category_name in ('WHITE RUM','IMPORTED VODKAS','PUERTO RICO & VIRGIN ISLANDS RUM','FLAVORED RUM','100% AGAVE TEQUILA','IMPORTED DRY GINS','SCOTCH WHISKIES','IMPORTED CORDIALS & LIQUEURS','GOLD RUM','SPICED RUM') then category_name else 'OTHER' END AS category_name,
+        case when county in ('POLK','LINN','SCOTT','BLACK HAWK','JOHNSON') then county else 'OTHER' END AS county, #'POTTAWATTAMIE','DUBUQUE','STORY','WOODBURY','DALLAS'
+        CASE
+        WHEN category_name like '%RUM%' THEN 'RUM'
+        WHEN category_name like '%VODKA%' THEN 'VODKA'
+        WHEN category_name like '%WHISK%' or  category_name like '%SCOTCH%' THEN 'WHISKY'
+        WHEN category_name like '%TEQUILA%' or category_name like '%MEZCAL%' THEN 'TEQUILA_MEZCAL'
+        WHEN category_name like '%LIQUEUR%' THEN 'LIQUEURS'
+        WHEN category_name like '%GIN%' THEN 'GIN'
+        else 'OTROS'
+        end as category_name,
         case when vendor_name in ('SAZERAC COMPANY  INC','DIAGEO AMERICAS','HEAVEN HILL BRANDS','LUXCO INC','JIM BEAM BRANDS','FIFTH GENERATION INC','PERNOD RICARD USA','MCCORMICK DISTILLING CO.','BACARDI USA INC','E & J GALLO WINERY') then vendor_name else 'OTHER' END as vendor_name,
         sum(bottles_sold) as bottles_sold
         FROM clean_data2
         group by 1,2,3,4
-        )
-        select extract(YEAR FROM date) as year,
-        extract(MONTH FROM date) as month,
-        extract(DAY FROM date) as day,
-        extract(DAYOFWEEK FROM date) as dow,
-        extract(WEEK from date) as week,
-        *
+        ), summary as (
+        select
+        * EXCEPT (vendor_name)
         from group_and_others
+        where lower(vendor_name) like '%bacardi%'
+        ), combinations as (
+        SELECT *
+        FROM UNNEST(GENERATE_DATE_ARRAY('{min_date}', '{max_date}', INTERVAL 1 DAY)) as date
+        cross join (select distinct category_name from summary) a
+        cross join (select distinct county from summary) b
+        ),
+        data_combinations as (
+            select c.*,
+            date_trunc(c.date, WEEK) as date_week,
+            coalesce(s.bottles_sold,0) as bottles_sold
+            from combinations c
+            left join summary s on c.date = s.date and c.category_name = s.category_name and c.county = s.county
+        )
+        select
+            date_week,
+            category_name,
+            county,
+            extract(YEAR FROM date_week) as week_year,
+            extract(WEEK(MONDAY) from date_week) as week_of_year,
+            sum(bottles_sold) as bottles_sold
+        from data_combinations
+        group by 1,2,3,4,5
+        order by county asc, category_name asc, date_week asc
+
     """
 
     data = get_data_with_cache(
@@ -83,29 +112,22 @@ def preprocess(*args) -> None:
         data_has_header=True
     )
 
-    # Clean data
-    data_clean = clean_data(data)
-    print("✅ Data cleaned ")
 
-    # Process data
-    X = data_clean.drop(['pack', 'bottle_volume_ml', 'state_bottle_cost', 'state_bottle_retail',
-                         'sale_dollars', 'volume_sold_liters','volume_sold_gallons'], axis=1, errors='ignore')
-    y = data_clean[['bottles_sold']]
-    X_processed,col_names = preprocess_features(X,True)
+    data_processed,col_names = preprocess_features(data,True)
     print("✅ Data Proccesed ")
 
     # Load a DataFrame onto BigQuery containing [pickup_datetime, X_processed, y]
     # using data.load_data_to_bq()
 
-
-    X_processed_df = pd.DataFrame(
-        X_processed,
+    data_processed = pd.DataFrame(
+        data_processed,
         columns=col_names
     )
 
-    data_processed = pd.concat([X_processed_df, y], axis="columns", sort=False)
-    data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
-    #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+    # data_processed = pd.concat([X_processed_df, y], axis="columns", sort=False)
+    # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
+    # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+
     processed_path = Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv")
     data_processed.to_csv(processed_path, header=True, index=False)
 
@@ -117,7 +139,7 @@ def preprocess(*args) -> None:
 
 def train(min_date:str = '2023-01-01',
         max_date:str = '2023-03-31',
-        split_ratio: float = 0.10, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
+        split_ratio: float = 0.20, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
         batch_size = 256,
         patience = 5
@@ -151,45 +173,37 @@ def train(min_date:str = '2023-01-01',
     )
 
     #tomar solo 10% de la data
-    data = data.sample(frac=0.1, random_state=42)  # Tomar solo el 10% de los datos
+    #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
 
-    # Create (X_train_processed, y_train, X_val_processed, y_val)
-    train_length = int(len(data) * (1 - split_ratio))
+    data = data.iloc[:,:-1]
+    print(f"creando secuencias para modelo RNN...")
+    X, y = create_sequences(data, past_steps=4, future_steps=1)
+    print("✅ Secuencias creadas ")
 
-    data_train = data.iloc[:train_length, :].sample(frac=1)
-    data_val = data.iloc[train_length:, :].sample(frac=1)
+    split_index = int((1-split_ratio) * len(X))
+    X_train, X_val = X[:split_index], X[split_index:]
+    y_train, y_val = y[:split_index], y[split_index:]
+    print("✅ Train/Val Split created ")
 
-    X_train = data_train.drop(['bottles_sold'], axis=1)
-    y_train = data_train[["bottles_sold"]]
+    print("Input shape X train completo:", X_train.shape)
+    print("Input shape X train[1:]:", X_train.shape[1:])
 
-    X_val = data_val.drop(['bottles_sold'], axis=1)
-    y_val = data_val[['bottles_sold']]
-
-    # Create (X_train_processed, X_val_processed) using `preprocessor.py`
-    # Luckily, our preprocessor is stateless: we can `fit_transform` both X_train and X_val without data leakage!
-    print(f"{X_train.shape=}")
-    print(f"{X_train.shape[1:]=}")
-    # Train model using `model.py`
-
-    print(f"creando secuencias train para modelo RNN...")
-    X_train_rnn, y_train_rnn = crear_secuencias(X_train, y_train, pasos=10)
-    print(f"creando secuencias val para modelo RNN...")
-    X_val_rnn, y_val_rnn = crear_secuencias(X_val, y_val, pasos=10)
+    print(X_train.dtype)
+    print(type(X_train))
 
     print(f"inicializando modelo")
-    print("Shape Train RNN con secuencia general:", X_train_rnn.shape)
-    print("Shape Train RNN con secuencia filtrado:", X_train_rnn.shape[1:])
-
-    model = initialize_model(input_shape=X_train_rnn.shape[1:])
+    model = initialize_model(input_shape=X_train.shape[1:])
     model = compile_model(model, learning_rate=learning_rate)
+
+    print("✅ Model compiled succesfully")
 
     model,history = train_model(
         model,
-        X_train_rnn,
-        y_train_rnn,
+        X_train,
+        y_train,
         batch_size=batch_size,
         patience=patience,
-        validation_data=(X_val_rnn, y_val_rnn)
+        validation_data=(X_val, y_val)
     )
 
     if 'val_mae' in history.history:
@@ -199,10 +213,10 @@ def train(min_date:str = '2023-01-01',
 
     print("val_mae:", val_mae)
 
-    params = dict(
-        context="train",
-        row_count=len(X_train),
-    )
+    # params = dict(
+    #     context="train",
+    #     row_count=len(X_train),
+    # )
 
     # Save results on the hard drive using taxifare.ml_logic.registry
     #save_results(params=params, metrics=dict(mae=val_mae))
@@ -245,7 +259,7 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
     return y_pred
 
 if __name__ == '__main__':
-    preprocess()
-    #train()
+    #preprocess()
+    train()
     #evaluate()
     #pred()

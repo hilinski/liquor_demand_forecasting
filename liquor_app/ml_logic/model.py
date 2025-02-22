@@ -12,7 +12,7 @@ from keras import Model, Sequential, layers, regularizers, optimizers
 from keras.callbacks import EarlyStopping
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import layers
-from tensorflow.keras.layers import Dense, SimpleRNN, Flatten, LSTM
+from tensorflow.keras.layers import Dense, SimpleRNN, Flatten, LSTM, Input
 from tensorflow.keras.layers import Normalization
 
 end = time.perf_counter()
@@ -23,20 +23,14 @@ def initialize_model(input_shape: tuple) -> Model:
     """
     Initialize the Neural Network with random weights
     """
-    #ver si es necesario regularizer..
-    #reg = regularizers.l1_l2(l2=0.005)
     model = Sequential()
-    #model.add(layers.Input(shape=input_shape))
 
-    model.add(SimpleRNN(units=10, activation='tanh', return_sequences = True, input_shape=input_shape))
-
-    model.add(layers.Dense(20, activation="linear"))#, kernel_regularizer=reg))
-    #model.add(layers.BatchNormalization(momentum=0.9))
-    #model.add(layers.Dropout(rate=0.1))
-    model.add(layers.Dense(10, activation="linear"))
-    #model.add(layers.BatchNormalization(momentum=0.9))  # use momentum=0 to only use statistic of the last seen minibatch in inference mode ("short memory"). Use 1 to average statistics of all seen batch during training histories.
-    #model.add(layers.Dropout(rate=0.1))
-    model.add(layers.Dense(1, activation="linear"))
+    # Add an explicit Input layer
+    model.add(Input(shape=input_shape))
+    model.add(SimpleRNN(units=10, activation='tanh', return_sequences=True))
+    model.add(Dense(20, activation="linear"))
+    model.add(Dense(10, activation="linear"))
+    model.add(Dense(1, activation="linear"))
 
     print("✅ Model initialized")
 
