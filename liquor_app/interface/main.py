@@ -15,65 +15,91 @@ from liquor_app.ml_logic.model import initialize_model, compile_model, train_mod
 from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
-def preprocess(*args) -> None:
-    query = """
-         with clean_data as (
-            select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
-            CAST(store_number AS NUMERIC) as store_number ,
-            CAST(zip_code AS NUMERIC) as zip_code ,
-            CAST(category AS NUMERIC) as category,
-            CAST(vendor_number AS NUMERIC) as vendor_number
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            where date <= '2023-03-31' and date >= '2020-01-01'
-            --and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
-            ORDER BY date ASC
+def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
+    query = f"""
+        with clean_data as (
+                select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
+                CAST(store_number AS NUMERIC) as store_number ,
+                CAST(zip_code AS NUMERIC) as zip_code ,
+                CAST(category AS NUMERIC) as category,
+                CAST(vendor_number AS NUMERIC) as vendor_number
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                where date >= '{min_date}' and date <= '{max_date}'
+                --and CAST(vendor_number AS NUMERIC) in (260,421,65,370,85,434,35,301,259,115,395,55,420,205,380,192,297,300,255,389)
+                ORDER BY date ASC
         ),
         distinct_vendor as (
-            select
+                select
                 CAST(vendor_number AS NUMERIC) as vendor_number,
                 ARRAY_TO_STRING(ARRAY_AGG(vendor_name ORDER BY date DESC LIMIT 1),"") as vendor_name
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            group by 1
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                group by 1
         ),
         distinct_category as (
-            select
+                select
                 CAST(category AS NUMERIC) as category,
                 ARRAY_TO_STRING(ARRAY_AGG(category_name ORDER BY date DESC LIMIT 1),"") as category_name
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            group by 1
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                group by 1
         ),
         distinct_store as (
-            select
+                select
                 CAST(store_number AS NUMERIC) as store_number,
                 ARRAY_TO_STRING(ARRAY_AGG(store_name ORDER BY date DESC LIMIT 1),"") as store_name
-            from `bigquery-public-data.iowa_liquor_sales.sales`
-            group by 1
+                from `bigquery-public-data.iowa_liquor_sales.sales`
+                group by 1
         ), clean_data2 as (
         select
-            cd.* EXCEPT (vendor_name, category_name, store_name),
-            dv.vendor_name,
-            dc.category_name,
-            ds.store_name
+                cd.* EXCEPT (vendor_name, category_name, store_name),
+                dv.vendor_name,
+                dc.category_name,
+                ds.store_name
         from clean_data cd
         left join distinct_vendor dv on cd.vendor_number = dv.vendor_number
         left join distinct_category dc on cd.category = dc.category
         left join distinct_store ds on cd.store_number = ds.store_number
         ), group_and_others as (
         SELECT date,
-        case when county in ('POLK','LINN','SCOTT','BLACK HAWK','JOHNSON','POTTAWATTAMIE','DUBUQUE','STORY','WOODBURY','DALLAS') then county else 'OTHER' END AS county,
-        case when category_name in ('WHITE RUM','IMPORTED VODKAS','PUERTO RICO & VIRGIN ISLANDS RUM','FLAVORED RUM','100% AGAVE TEQUILA','IMPORTED DRY GINS','SCOTCH WHISKIES','IMPORTED CORDIALS & LIQUEURS','GOLD RUM','SPICED RUM') then category_name else 'OTHER' END AS category_name,
+        case when county in ('POLK','LINN','SCOTT','BLACK HAWK','JOHNSON') then county else 'OTHER' END AS county, #'POTTAWATTAMIE','DUBUQUE','STORY','WOODBURY','DALLAS'
+        CASE
+        WHEN category_name like '%RUM%' THEN 'RUM'
+        WHEN category_name like '%VODKA%' THEN 'VODKA'
+        WHEN category_name like '%WHISK%' or  category_name like '%SCOTCH%' THEN 'WHISKY'
+        WHEN category_name like '%TEQUILA%' or category_name like '%MEZCAL%' THEN 'TEQUILA_MEZCAL'
+        WHEN category_name like '%LIQUEUR%' THEN 'LIQUEURS'
+        WHEN category_name like '%GIN%' THEN 'GIN'
+        else 'OTROS'
+        end as category_name,
         case when vendor_name in ('SAZERAC COMPANY  INC','DIAGEO AMERICAS','HEAVEN HILL BRANDS','LUXCO INC','JIM BEAM BRANDS','FIFTH GENERATION INC','PERNOD RICARD USA','MCCORMICK DISTILLING CO.','BACARDI USA INC','E & J GALLO WINERY') then vendor_name else 'OTHER' END as vendor_name,
         sum(bottles_sold) as bottles_sold
         FROM clean_data2
         group by 1,2,3,4
-        )
-        select extract(YEAR FROM date) as year,
-        extract(MONTH FROM date) as month,
-        extract(DAY FROM date) as day,
-        extract(DAYOFWEEK FROM date) as dow,
-        extract(WEEK from date) as week,
-        *
+        ), summary as (
+        select
+        * EXCEPT (vendor_name)
         from group_and_others
+        where lower(vendor_name) like '%bacardi%'
+        ), combinations as (
+        SELECT
+          *
+          FROM UNNEST(GENERATE_DATE_ARRAY('{min_date}', '{max_date}', INTERVAL 1 DAY)) as date
+          cross join (select distinct category_name from summary) a
+          cross join (select distinct county from summary) b
+          ), data_combinations as (
+        select c.*,
+        date_trunc(c.date, WEEK) as date_week,
+          coalesce(s.bottles_sold,0) as bottles_sold
+          from combinations c
+          left join summary s on c.date = s.date and c.category_name = s.category_name and c.county = s.county
+          )
+          select date_week, category_name, county,
+          extract(YEAR FROM date_week) as week_year,
+          extract(WEEK(MONDAY) from date_week) as week_of_year,
+           sum(bottles_sold) as bottles_sold
+           from data_combinations
+           group by 1,2,3,4,5
+           order by county asc, category_name asc, date_week asc
+
     """
     print(RAW_DATA_PATH)
 
