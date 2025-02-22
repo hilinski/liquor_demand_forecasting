@@ -12,10 +12,10 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, crear_secuencias, create_sequences
+from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
-def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
+def get_data(min_date='2013-01-01', max_date='2023-06-30'):
     query = f"""
         with clean_data as (
                 select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
@@ -110,8 +110,15 @@ def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
         data_has_header=True
     )
 
-    grouped_lengths = data.groupby(["county", "category_name"]).size()
-    print(grouped_lengths)
+    return data
+
+#def crear_secuencias_rnn(data):
+#    pass
+#    #return X, y
+
+def preprocess(data) -> None:
+    columnas_target = data[["bottles_sold"]]
+    columnas_apoyo = data[['category_name','county']]
 
     data_processed,col_names = preprocess_features(data,True)
     print("✅ Data Proccesed ")
@@ -124,7 +131,8 @@ def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
         columns=col_names
     )
 
-    # data_processed = pd.concat([X_processed_df, y], axis="columns", sort=False)
+    data_processed = pd.concat([data_processed, columnas_apoyo, columnas_target], axis="columns", sort=False)
+    data_processed.columns = data_processed.columns.str.replace(" ", "_")
     # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
     # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
 
@@ -142,7 +150,7 @@ def train(min_date:str = '2023-01-01',
         split_ratio: float = 0.20, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
         batch_size = 256,
-        patience = 5
+        patience = 10
     ) -> float:
 
     """
@@ -156,8 +164,8 @@ def train(min_date:str = '2023-01-01',
     print("\n⭐️ Use case: train")
     print( "\nLoading preprocessed validation data...")
 
-    min_date = parse(min_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
-    max_date = parse(max_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+    #min_date = parse(min_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+    #max_date = parse(max_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
 
     # Load processed data using `get_data_with_cache` in chronological order
     # Try it out manually on console.cloud.google.com first!
@@ -174,11 +182,13 @@ def train(min_date:str = '2023-01-01',
 
     #tomar solo 10% de la data
     #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
+    columnas_target = data[["bottles_sold"]].copy()
+    columnas_apoyo = data[['category_name','county']].copy()
 
-    data = data.iloc[:,:-1]
+    data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns)+1)]
 
     print(f"creando secuencias para modelo RNN...")
-    X, y = create_sequences(data, past_steps=4, future_steps=1)
+    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=12)
     print("✅ Secuencias creadas ")
 
     split_index = int((1-split_ratio) * len(X))
@@ -187,7 +197,12 @@ def train(min_date:str = '2023-01-01',
     print("✅ Train/Val Split created ")
 
     print("Input shape X train completo:", X_train.shape)
+    print("Input shape y train completo:", y_train.shape)
     print("Input shape X train[1:]:", X_train.shape[1:])
+    print("Input shape X val completo:", X_val.shape)
+    print("Input shape y train completo:",y_train.shape)
+    print("Input shape y val completo:",y_val.shape)
+
 
     print(X_train.dtype)
     print(type(X_train))
@@ -227,13 +242,13 @@ def train(min_date:str = '2023-01-01',
 
     print("✅ train() done \n")
 
-    return val_mae
+    return val_mae, X_val
 
 
 def evaluate(*args) -> float:
     pass
 
-def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
+def pred(X_pred:np.ndarray = None) -> np.ndarray:
 
     if X_pred is None:
         print(f"cargando datos dummy para X_pred")
@@ -242,17 +257,37 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
         cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
         data_has_header=True
         )
-        data = data.iloc[-20:, :]
+        # data = data.iloc[-20:, :]
         print(f"{data.shape}")
-        X_pred = data.drop(['bottles_sold'], axis=1)
-        X_pred, X_pred2 = crear_secuencias(X_pred, X_pred, pasos=10)
-        print(f"{X_pred}")
+
+        columnas_target = data[["bottles_sold"]].copy()
+        columnas_apoyo = data[['category_name','county']].copy()
+        data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns)+1)]
+        X,y = create_sequences(data_preproc, columnas_apoyo, columnas_target, past_steps=52, future_steps=12)
+        split_ratio = 0.2
+        split_index = int((1-split_ratio) * len(X))
+        X_prep = X[split_index:]
+        y_prep = y[split_index:]
+        print("✅ Pred data created ")
+        print("X_prep shape:", X_prep.shape)
+
+        model = load_model()
+        assert model is not None
+        print(f"modelo cargado")
+
+        print(f"predicting X_pred")
+        y_pred = model.predict(X_prep)
+
+        print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
+        return y_pred
+
 
     print(f"cargando modelo")
     model = load_model()
     assert model is not None
     print(f"modelo cargado")
 
+    print("X_pred shape:", X_pred.shape)
     print(f"predicting X_pred")
     y_pred = model.predict(X_pred)
 
@@ -260,7 +295,8 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
     return y_pred
 
 if __name__ == '__main__':
-    preprocess()
-    train()
+    data = get_data()
+    preprocess(data)
+    val_mae, X_val = train()
     #evaluate()
-    #pred()
+    #print(pred())
