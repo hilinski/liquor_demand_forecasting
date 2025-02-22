@@ -103,13 +103,15 @@ def preprocess(min_date='2013-01-01', max_date='2023-06-30', *args) -> None:
     """
     print(RAW_DATA_PATH)
 
-    data_clean = get_data_with_cache(
+    data = get_data_with_cache(
         gcp_project = GCP_PUBLIC_DATA,
         query = query,
         cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
         data_has_header=True
     )
 
+    grouped_lengths = data.groupby(["county", "category_name"]).size()
+    print(grouped_lengths)
 
     data_processed,col_names = preprocess_features(data,True)
     print("✅ Data Proccesed ")
@@ -174,6 +176,7 @@ def train(min_date:str = '2023-01-01',
     #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
 
     data = data.iloc[:,:-1]
+
     print(f"creando secuencias para modelo RNN...")
     X, y = create_sequences(data, past_steps=4, future_steps=1)
     print("✅ Secuencias creadas ")
@@ -257,7 +260,7 @@ def pred(X_pred: pd.DataFrame = None) -> np.ndarray:
     return y_pred
 
 if __name__ == '__main__':
-    #preprocess()
+    preprocess()
     train()
     #evaluate()
     #pred()
