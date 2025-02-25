@@ -299,4 +299,4 @@ if __name__ == '__main__':
     preprocess(data)
     val_mae, X_val = train()
     #evaluate()
-    #print(pred())
+    print(pred())
