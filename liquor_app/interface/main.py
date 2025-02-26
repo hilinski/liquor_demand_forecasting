@@ -294,9 +294,13 @@ def pred(X_pred:np.ndarray = None) -> np.ndarray:
     print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
     return y_pred
 
+def pred_future(model, last_sequence, future_steps=3):
+    pass
+
 if __name__ == '__main__':
     data = get_data()
     preprocess(data)
     val_mae, X_val = train()
     #evaluate()
-    print(pred())
+    pred = pred(X_val)
+    print(pred)
