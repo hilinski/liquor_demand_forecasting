@@ -13,8 +13,6 @@ from liquor_app.ml_logic.encoders import transform_numeric_features
 
 def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
-
-
     def create_sklearn_preprocessor() -> ColumnTransformer:
         """
         Scikit-learn pipeline that transforms a cleaned dataset of shape (_, 7)
