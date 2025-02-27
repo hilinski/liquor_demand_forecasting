@@ -19,7 +19,7 @@ end = time.perf_counter()
 print(f"\n✅ TensorFlow loaded ({round(end - start, 2)}s)")
 
 
-def initialize_model(input_shape: tuple) -> Model:
+def initialize_model(input_shape: tuple, future_steps:int=12) -> Model:
     """
     Initialize the Neural Network with random weights
     """
@@ -27,10 +27,10 @@ def initialize_model(input_shape: tuple) -> Model:
 
     # Add an explicit Input layer
     model.add(Input(shape=input_shape))
-    model.add(SimpleRNN(units=10, activation='tanh', return_sequences=True))
+    model.add(SimpleRNN(units=10, activation='tanh', return_sequences=False))
     model.add(Dense(20, activation="linear"))
     model.add(Dense(10, activation="linear"))
-    model.add(Dense(1, activation="linear"))
+    model.add(Dense(future_steps, activation="linear"))
 
     print("✅ Model initialized")
 
