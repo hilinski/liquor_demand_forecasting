@@ -93,5 +93,5 @@ def create_sequences_padre(data_preproc, columnas_target, past_steps=10, future_
             for x_item in X_sequence:
                 X.append(x_item)
             for y_item in y_sequence:
-                y.append([y_item])
+                y.append(y_item)
     return np.array(X), np.array(y)

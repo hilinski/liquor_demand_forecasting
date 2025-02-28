@@ -242,7 +242,7 @@ def train(min_date:str = '2023-01-01',
 
     print("✅ train() done \n")
 
-    return val_mae, X_val
+    return val_mae, X_val, y_train, y_val
 
 
 def evaluate(*args) -> float:
