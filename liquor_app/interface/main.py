@@ -14,6 +14,7 @@ from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
 from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
+future_steps = 12
 
 def get_data(min_date='2013-01-01', max_date='2023-06-30'):
     query = f"""
@@ -112,14 +113,16 @@ def get_data(min_date='2013-01-01', max_date='2023-06-30'):
 
     return data
 
-#def crear_secuencias_rnn(data):
-#    pass
-#    #return X, y
 
 def preprocess(data) -> None:
+    month_in_year = 12
+    data['date_week'] = pd.to_datetime(data['date_week'])
+    data['num_month'] = data['date_week'].dt.month
+    data['sin_MoSold'] = np.sin(2*np.pi*data.num_month/month_in_year)
+    data['cos_MoSold'] = np.cos(2*np.pi*data.num_month/month_in_year)
+    data = data.drop('num_month', axis=1)
     columnas_target = data[["bottles_sold"]]
-    columnas_apoyo = data[['category_name','county']]
-
+    columnas_apoyo = data[['category_name','county','sin_MoSold','cos_MoSold']]
     data_processed,col_names = preprocess_features(data,True)
     print("✅ Data Proccesed ")
 
@@ -150,7 +153,8 @@ def train(min_date:str = '2023-01-01',
         split_ratio: float = 0.20, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
         batch_size = 256,
-        patience = 10
+        patience = 10,
+        future_steps = future_steps
     ) -> float:
 
     """
@@ -183,12 +187,12 @@ def train(min_date:str = '2023-01-01',
     #tomar solo 10% de la data
     #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
     columnas_target = data[["bottles_sold"]].copy()
-    columnas_apoyo = data[['category_name','county']].copy()
+    columnas_apoyo = data[['category_name','county','sin_MoSold', 'cos_MoSold']].copy()
 
-    data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns)+1)]
-
+    data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
+    data_preproc = data_preproc.drop('remainder__date_week', axis=1)
     print(f"creando secuencias para modelo RNN...")
-    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=12)
+    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=future_steps)
     print("✅ Secuencias creadas ")
 
     split_index = int((1-split_ratio) * len(X))
@@ -203,12 +207,8 @@ def train(min_date:str = '2023-01-01',
     print("Input shape y train completo:",y_train.shape)
     print("Input shape y val completo:",y_val.shape)
 
-
-    print(X_train.dtype)
-    print(type(X_train))
-
     print(f"inicializando modelo")
-    model = initialize_model(input_shape=X_train.shape[1:])
+    model = initialize_model(input_shape=X_train.shape[1:], future_steps=future_steps)
     model = compile_model(model, learning_rate=learning_rate)
 
     print("✅ Model compiled succesfully")
@@ -248,7 +248,7 @@ def train(min_date:str = '2023-01-01',
 def evaluate(*args) -> float:
     pass
 
-def pred(X_pred:np.ndarray = None) -> np.ndarray:
+def pred(X_pred:np.ndarray = None, future_steps= future_steps) -> np.ndarray:
 
     if X_pred is None:
         print(f"cargando datos dummy para X_pred")
@@ -262,8 +262,8 @@ def pred(X_pred:np.ndarray = None) -> np.ndarray:
 
         columnas_target = data[["bottles_sold"]].copy()
         columnas_apoyo = data[['category_name','county']].copy()
-        data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns)+1)]
-        X,y = create_sequences(data_preproc, columnas_apoyo, columnas_target, past_steps=52, future_steps=12)
+        data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
+        X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=future_steps)
         split_ratio = 0.2
         split_index = int((1-split_ratio) * len(X))
         X_prep = X[split_index:]
@@ -302,5 +302,4 @@ if __name__ == '__main__':
     preprocess(data)
     val_mae, X_val = train()
     #evaluate()
-    pred = pred(X_val)
-    print(pred)
+    print(pred(X_val))
