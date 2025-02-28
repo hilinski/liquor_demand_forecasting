@@ -16,7 +16,7 @@ from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequenc
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 future_steps = 12
 
-def get_data(min_date='2013-01-01', max_date='2023-06-30'):
+def get_data(min_date='2013-01-01', max_date='2025-01-31'):
     query = f"""
         with clean_data as (
                 select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
@@ -300,6 +300,6 @@ def pred_future(model, last_sequence, future_steps=3):
 if __name__ == '__main__':
     data = get_data()
     preprocess(data)
-    val_mae, X_val = train()
+    val_mae, X_val, y_train, y_val = train()
     #evaluate()
     print(pred(X_val))
