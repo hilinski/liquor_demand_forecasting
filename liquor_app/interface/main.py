@@ -16,7 +16,7 @@ from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequenc
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 future_steps = 12
 
-def get_data(min_date='2013-01-01', max_date='2023-06-30'):
+def get_data(min_date='2013-01-01', max_date='2025-01-31'):
     query = f"""
         with clean_data as (
                 select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
@@ -293,9 +293,26 @@ def pred(X_pred:np.ndarray = None, future_steps= future_steps) -> np.ndarray:
     print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
     return y_pred
 
+def prepare_data_to_visualization():
+    data = get_data_with_cache(
+        gcp_project = GCP_PUBLIC_DATA,
+        query = 'hi',
+        cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
+        data_has_header=True
+    )
+    dummy_data = data.query("date_week >= '2024-01-01' and date_week < '2025-01-01'")
+    dummy_data['is_pred'] = False
+    dummy_data2 = data.query("date_week >= '2025-01-01'")
+    dummy_data2['is_pred'] = True
+    dummy_data_df = pd.concat([dummy_data, dummy_data2], axis=0)
+    return dummy_data_df
+
 if __name__ == '__main__':
-    data = get_data()
-    preprocess(data)
-    val_mae, X_val = train()
-    #evaluate()
-    print(pred(X_val))
+    #data = get_data()
+    #preprocess(data)
+    #val_mae, X_val = train()
+    #print(pred(X_val))
+    data = prepare_data_to_visualization()
+    print(f"{data.shape=}")
+    print(data.head())
+    print(data.tail())
