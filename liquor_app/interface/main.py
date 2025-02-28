@@ -14,6 +14,7 @@ from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
 from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
+
 future_steps = 12
 
 def get_data(min_date='2013-01-01', max_date='2025-01-31'):
@@ -147,12 +148,12 @@ def preprocess(data) -> None:
     return data_processed
 
 
-def train(min_date:str = '2023-01-01',
-        max_date:str = '2023-03-31',
-        split_ratio: float = 0.20, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
+def train(min_date:str = '2013-01-01',
+        max_date:str = '2024-12-31',
+        split_ratio: float = 0.083333333, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
-        batch_size = 256,
-        patience = 10,
+        batch_size = 128,
+        patience = 20,
         future_steps = future_steps
     ) -> float:
 
@@ -182,6 +183,8 @@ def train(min_date:str = '2023-01-01',
         cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
         data_has_header=True
     )
+
+    data = data.query(f"remainder__date_week >= {min_date} and remainder__date_week <= {max_date}")
 
     #tomar solo 10% de la data
     #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
