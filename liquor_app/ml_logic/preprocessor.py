@@ -32,6 +32,7 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
         # NUMERIC PIPE
         numerical_features = ['week_year','week_of_year','bottles_sold']
+        #numerical_features = ['week_year','week_of_year']
         num_pipe = make_pipeline(
             RobustScaler()
         )

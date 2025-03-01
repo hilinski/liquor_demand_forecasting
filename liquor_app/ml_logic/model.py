@@ -12,7 +12,7 @@ from keras import Model, Sequential, layers, regularizers, optimizers
 from keras.callbacks import EarlyStopping
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import layers
-from tensorflow.keras.layers import Dense, SimpleRNN, Flatten, LSTM, Input
+from tensorflow.keras.layers import Dense, SimpleRNN, Flatten, LSTM, Input, Dropout
 from tensorflow.keras.layers import Normalization
 
 end = time.perf_counter()
@@ -26,10 +26,22 @@ def initialize_model(input_shape: tuple, future_steps:int=12) -> Model:
     model = Sequential()
 
     # Add an explicit Input layer
-    model.add(Input(shape=input_shape))
-    model.add(SimpleRNN(units=10, activation='tanh', return_sequences=False))
-    model.add(Dense(20, activation="linear"))
-    model.add(Dense(10, activation="linear"))
+    #model.add(Input(shape=input_shape))
+    #model.add(SimpleRNN(units=100, activation='tanh', return_sequences=False))
+    #model.add(Dense(50, activation="linear"))
+    #model.add(Dense(30, activation="linear"))
+    #model.add(Dense(10, activation="linear"))
+    #model.add(Dense(future_steps, activation="linear"))
+
+    # Better RNN layers with return_sequences=True
+    #model.add(Input(shape=input_shape))
+    model.add(SimpleRNN(units=64, activation='tanh', return_sequences=True))
+    model.add(Dropout(0.2))
+    model.add(SimpleRNN(units=32, activation='tanh'))
+    model.add(Dropout(0.2))
+    # More complex Dense layers
+    model.add(Dense(128, activation="relu"))
+    model.add(Dense(64, activation="relu"))
     model.add(Dense(future_steps, activation="linear"))
 
     print("✅ Model initialized")
