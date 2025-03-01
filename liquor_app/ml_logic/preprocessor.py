@@ -93,3 +93,23 @@ def create_sequences_padre(data_preproc, columnas_target, past_steps=10, future_
             for y_item in y_sequence:
                 y.append(y_item)
     return np.array(X), np.array(y)
+
+def create_sequences_inference(data_preproc, past_steps=52):
+    """
+    Create sequences from new unseen data for inference (prediction).
+    Returns only X_pred (input features), without y.
+    """
+    X_pred = []
+    # Ensure that we have at least 'past_steps' weeks of data
+    if len(data_preproc) < past_steps:
+        raise ValueError(f"Not enough data. Need at least {past_steps} weeks, got {len(data_preproc)}")
+
+    for county in data_preproc.iloc[:, data_preproc.columns.str.contains('cat_preproc__county_')].columns:
+        for cat_prod in data_preproc.iloc[:, data_preproc.columns.str.contains('cat_preproc__category_name_')].columns:
+            df_filtrado = data_preproc.query(f"{county} == 1 and {cat_prod} == 1")
+
+            # Extract the last 'past_steps' weeks
+            if len(df_filtrado) >= past_steps:
+                X_pred.append(df_filtrado.iloc[-past_steps:].values)  # Last x weeks
+
+    return np.array(X_pred)  # Shape: (num_groups, past_steps, num_features)
