@@ -149,12 +149,12 @@ def preprocess(data) -> None:
     return data_processed
 
 
-def train(min_date:str = '2013-01-01',
+def train(min_date:str = '2019-01-01',
         max_date:str = '2024-12-31',
         split_ratio: float = 0.083333333, # represents 1 year of the dataset
-        learning_rate=0.0005,
-        batch_size = 128,
-        patience = 20,
+        learning_rate=0.0105,
+        batch_size = 256,
+        patience = 10,
         future_steps = future_steps
     ) -> float:
 
@@ -261,7 +261,7 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
             cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
             data_has_header=True
         )
-        df_pred = data.query(f"date_week >= '2024-01-01' and date_week <= '2024-12-31' ")
+        df_pred = data.query(f"date_week >= '2024-01-01' and date_week <= '2024-12-31'")
         month_in_year = 12
         df_pred['date_week'] = pd.to_datetime(df_pred['date_week'])
         df_pred['num_month'] = df_pred['date_week'].dt.month
@@ -286,6 +286,7 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
 
         X_pred = create_sequences_inference(df_processed, past_steps=past_steps)
         print("✅ Create Sequences complete ")
+        print(f"{X_pred[0][0]=}")
 
         print(f"cargando modelo")
         model = load_model()
@@ -304,9 +305,9 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
         # 2. Create a DataFrame for predictions
         last_date = df_pred['date_week'].max()  # Get last available date
         future_dates = pd.date_range(start=last_date + pd.Timedelta(weeks=1), periods=future_steps, freq='W')
-        print(last_date)
-        print(future_dates)
-        print(len(future_dates))
+        #print(f"{last_date=}")
+        #print(f"{future_dates=}")
+        #print(len(future_dates))
 
         print("✅ Step 2 completed ")
 
@@ -321,6 +322,9 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
                 'category_name': category,
                 'bottles_sold': y_pred[i]  # Get the corresponding predictions
             })
+            print(f"{i=}")
+            print(f"{(county, category)}")
+            print(f"{temp_df=}")
             predictions_df = pd.concat([predictions_df, temp_df])
 
         print("✅ Step 3 completed ")
@@ -335,7 +339,7 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
         print("✅ Step 4 completed ")
 
         # 5. Sort by date for visualization
-        df_combined = df_combined.sort_values(by=['county', 'category_name', 'date_week'])
+        #df_combined = df_combined.sort_values(by=['county', 'category_name', 'date_week'])
 
         print("✅ Step 5 completed ")
 
@@ -348,13 +352,16 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
         y_real = aux_real[['date_week','county', 'category_name','bottles_sold','is_predict']]
 
         y_combined = pd.concat([y_real, predictions_df], ignore_index=True)
-        y_combined = y_combined.sort_values(by=['county', 'category_name', 'date_week'])
+        #y_combined = y_combined.sort_values(by=['county', 'category_name', 'date_week'])
 
+        df_combined = pd.concat([df_combined,y_real], ignore_index=True)
         print("✅  Y Combined Output:")
         print(y_combined.head(10))
         # Store as CSV if the BQ query returned at least one valid line
-        if y_combined.shape[0] > 1:
-            y_combined.to_csv(Path(PRED_DATA_PATH).joinpath("data.csv"), header=True, index=False)
+        if df_combined.shape[0] > 1:
+            df_combined.date_week = pd.to_datetime(df_combined.date_week)
+            df_combined.to_csv(Path(PRED_DATA_PATH).joinpath("data.csv"), header=True, index=False, date_format='%Y-%m-%d')
+            print(f"df_pred creado en {Path(PRED_DATA_PATH).joinpath('data.csv')} ")
         return y_combined
 
 
@@ -386,7 +393,7 @@ def prepare_data_to_visualization():
 if __name__ == '__main__':
     #data = get_data()
     #preprocess(data)
-    #train()
+    train()
     #print(pred(X_val))
     pred(past_steps=past_steps, future_steps=future_steps)
     #data = prepare_data_to_visualization()
