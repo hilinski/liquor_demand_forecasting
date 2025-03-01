@@ -150,7 +150,7 @@ def preprocess(data) -> None:
 
 
 def train(min_date:str = '2013-01-01',
-        max_date:str = '2023-12-31',
+        max_date:str = '2024-12-31',
         split_ratio: float = 0.083333333, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
         learning_rate=0.0005,
         batch_size = 128,
