@@ -184,8 +184,7 @@ def train(min_date:str = '2013-01-01',
         data_has_header=True
     )
 
-    data = data.query(f"remainder__date_week >= {min_date} and remainder__date_week <= {max_date}")
-
+    data = data.query(f"remainder__date_week >= '{min_date}' and remainder__date_week <= '{max_date}'")
     #tomar solo 10% de la data
     #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
     columnas_target = data[["bottles_sold"]].copy()
@@ -311,11 +310,11 @@ def prepare_data_to_visualization():
     return dummy_data_df
 
 if __name__ == '__main__':
-    #data = get_data()
-    #preprocess(data)
-    #val_mae, X_val = train()
-    #print(pred(X_val))
-    data = prepare_data_to_visualization()
-    print(f"{data.shape=}")
-    print(data.head())
-    print(data.tail())
+    data = get_data()
+    preprocess(data)
+    val_mae, X_val = train()
+    print(pred(X_val))
+    # data = prepare_data_to_visualization()
+    # print(f"{data.shape=}")
+    # print(data.head())
+    # print(data.tail())
