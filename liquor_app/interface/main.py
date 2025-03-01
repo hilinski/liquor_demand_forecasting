@@ -12,7 +12,7 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre
+from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre, create_sequences_inference
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
 future_steps = 12
@@ -184,7 +184,7 @@ def train(min_date:str = '2013-01-01',
         data_has_header=True
     )
 
-    data = data.query(f"remainder__date_week >= {min_date} and remainder__date_week <= {max_date}")
+    data = data.query(f"remainder__date_week >= '{min_date}' and remainder__date_week <= '{max_date}' ")
 
     #tomar solo 10% de la data
     #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
@@ -250,51 +250,121 @@ def train(min_date:str = '2013-01-01',
 def evaluate(*args) -> float:
     pass
 
-def pred(X_pred:np.ndarray = None, future_steps= future_steps) -> np.ndarray:
+def pred(X_pred:np.ndarray = None,  past_steps=52, future_steps=future_steps) -> pd.DataFrame:
 
     if X_pred is None:
-        print(f"cargando datos dummy para X_pred")
+        query = """SELECT 'hello world'"""
+
         data = get_data_with_cache(GCP_PUBLIC_DATA,
-        query = 'hi',
-        cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
-        data_has_header=True
+            query,
+            cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
+            data_has_header=True
         )
-        # data = data.iloc[-20:, :]
-        print(f"{data.shape}")
+        df_pred = data.query(f"date_week >= '2024-01-01' and date_week <= '2024-12-31' ")
+        month_in_year = 12
+        df_pred['date_week'] = pd.to_datetime(df_pred['date_week'])
+        df_pred['num_month'] = df_pred['date_week'].dt.month
+        df_pred['sin_MoSold'] = np.sin(2*np.pi*df_pred.num_month/month_in_year)
+        df_pred['cos_MoSold'] = np.cos(2*np.pi*df_pred.num_month/month_in_year)
+        df_pred = df_pred.drop('num_month', axis=1)
+        print(" ✅ df_pred shape before process:", df_pred.shape)
+        df_processed,col_names = preprocess_features(df_pred,False)
+        print("✅ Data Proccesed ")
 
-        columnas_target = data[["bottles_sold"]].copy()
-        columnas_apoyo = data[['category_name','county']].copy()
-        data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
-        X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=future_steps)
-        split_ratio = 0.2
-        split_index = int((1-split_ratio) * len(X))
-        X_prep = X[split_index:]
-        y_prep = y[split_index:]
-        print("✅ Pred data created ")
-        print("X_prep shape:", X_prep.shape)
+        df_processed = pd.DataFrame(
+            df_processed,
+            columns=col_names
+        )
+        print(" ✅ df_pred shape after process:", df_processed.shape)
+        df_processed = df_processed.drop('remainder__date_week', axis=1)
+        for columns in df_processed.columns:
+            df_processed[columns] = df_processed[columns].astype(float)
 
+        df_processed.columns = df_processed.columns.str.replace(" ", "_")
+        print("df_processed info columns: ", df_processed.info())
+
+        X_pred = create_sequences_inference(df_processed, past_steps=past_steps)
+        print("✅ Create Sequences complete ")
+
+        print(f"cargando modelo")
         model = load_model()
         assert model is not None
         print(f"modelo cargado")
-
-        print(f"predicting X_pred")
-        y_pred = model.predict(X_prep)
-
+        y_pred = model.predict(X_pred)
         print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
-        return y_pred
+        print("type of y_pred:" , type(y_pred))
+
+        # 1. Get unique country-category pairs
+        unique_pairs = df_pred[['county', 'category_name']].drop_duplicates().reset_index(drop=True)
+
+        print("✅ Step 1 completed ")
 
 
-    print(f"cargando modelo")
-    model = load_model()
-    assert model is not None
-    print(f"modelo cargado")
+        # 2. Create a DataFrame for predictions
+        last_date = df_pred['date_week'].max()  # Get last available date
+        future_dates = pd.date_range(start=last_date + pd.Timedelta(weeks=1), periods=future_steps, freq='W')
+        print(last_date)
+        print(future_dates)
+        print(len(future_dates))
 
-    print("X_pred shape:", X_pred.shape)
-    print(f"predicting X_pred")
-    y_pred = model.predict(X_pred)
+        print("✅ Step 2 completed ")
 
-    print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
-    return y_pred
+        # Create a DataFrame to store predictions
+        predictions_df = pd.DataFrame()
+
+        # 3. Fill the DataFrame with predictions
+        for i, (county, category) in enumerate(unique_pairs.itertuples(index=False)):
+            temp_df = pd.DataFrame({
+                'date_week': future_dates,  # Assign future dates
+                'county': county,
+                'category_name': category,
+                'bottles_sold': y_pred[i]  # Get the corresponding predictions
+            })
+            predictions_df = pd.concat([predictions_df, temp_df])
+
+        print("✅ Step 3 completed ")
+
+
+        # 4. Append predictions to raw data
+        df_pred_filter = df_pred[['date_week','county', 'category_name','bottles_sold']]
+        df_pred_filter["is_predict"] = False
+        predictions_df["is_predict"] = True
+        df_combined = pd.concat([df_pred_filter, predictions_df], ignore_index=True)
+
+        print("✅ Step 4 completed ")
+
+        # 5. Sort by date for visualization
+        df_combined = df_combined.sort_values(by=['county', 'category_name', 'date_week'])
+
+        print("✅ Step 5 completed ")
+
+        print("✅  DF Combined Output:")
+        print(df_combined.head(10))
+
+        aux = data.query(f"date_week >= '2024-01-01' and date_week <= '2025-01-31' ")
+        aux["is_predict"] = False
+        aux_real = aux[aux['date_week']>="2025-01-01"]
+        y_real = aux_real[['date_week','county', 'category_name','bottles_sold','is_predict']]
+
+        y_combined = pd.concat([y_real, predictions_df], ignore_index=True)
+        y_combined = y_combined.sort_values(by=['county', 'category_name', 'date_week'])
+
+        print("✅  Y Combined Output:")
+        print(y_combined.head(10))
+
+        return y_combined
+
+
+    # print(f"cargando modelo")
+    # model = load_model()
+    # assert model is not None
+    # print(f"modelo cargado")
+
+    # print(f"predicting X_pred")
+    # y_pred = model.predict(X_pred)
+
+    # print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
+    #return y_pred
 
 def prepare_data_to_visualization():
     data = get_data_with_cache(
@@ -315,7 +385,8 @@ if __name__ == '__main__':
     #preprocess(data)
     #val_mae, X_val = train()
     #print(pred(X_val))
-    data = prepare_data_to_visualization()
-    print(f"{data.shape=}")
-    print(data.head())
-    print(data.tail())
+    pred(past_steps=52, future_steps=12)
+    #data = prepare_data_to_visualization()
+    # print(f"{data.shape=}")
+    # print(data.head())
+    # print(data.tail())
