@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import pdb
+pd.set_option('display.max_columns', None)  # Show all columns
+pd.set_option('display.expand_frame_repr', False)  # Prevents line wrapping
 
 import os
 import sys
@@ -12,7 +14,7 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre, create_sequences_inference
+from liquor_app.ml_logic.preprocessor import preprocess_features, assign_integer_ids, create_sequences_inference, create_sequences_fixed
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
 past_steps = 52
@@ -116,137 +118,93 @@ def get_data(min_date='2013-01-01', max_date='2025-01-31'):
     return data
 
 
-def preprocess(data) -> None:
-    month_in_year = 12
-    data['date_week'] = pd.to_datetime(data['date_week'])
-    data['num_month'] = data['date_week'].dt.month
-    data['sin_MoSold'] = np.sin(2*np.pi*data.num_month/month_in_year)
-    data['cos_MoSold'] = np.cos(2*np.pi*data.num_month/month_in_year)
-    data = data.drop('num_month', axis=1)
-    columnas_target = data[["bottles_sold"]]
-    columnas_apoyo = data[['category_name','county','sin_MoSold','cos_MoSold']]
-    data_processed,col_names = preprocess_features(data,True)
-    print("✅ Data Proccesed ")
+def assign_integer_ids(data: pd.DataFrame):
+    """Assign unique integer IDs to categorical variables instead of one-hot encoding."""
+    county_mapping = {county: idx for idx, county in enumerate(data["county"].unique())}
+    category_mapping = {category: idx for idx, category in enumerate(data["category_name"].unique())}
 
-    # # # LOAD A DATAFRAME ONTO BIGQUERY CONTAINING [PICKUP_DATETIME, X_PROCESSED, Y]
-    # # # USING DATA.LOAD_DATA_TO_BQ()
+    # Apply mappings
+    data["county_id"] = data["county"].map(county_mapping).astype(int)
+    data["category_id"] = data["category_name"].map(category_mapping).astype(int)
 
-    data_processed = pd.DataFrame(
-        data_processed,
-        columns=col_names
-    )
+    print(f"✅ Assigned integer IDs for counties and categories")
 
-    data_processed = pd.concat([data_processed, columnas_apoyo, columnas_target], axis="columns", sort=False)
-    data_processed.columns = data_processed.columns.str.replace(" ", "_")
-    # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
-    # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
-
-    processed_path = Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv")
-    data_processed.to_csv(processed_path, header=True, index=False)
-
-    print(f"✅ Raw data saved as {RAW_DATA_PATH}")
-    print(f"✅ Processed data saved as {PROCESSED_DATA_PATH}")
-    print("✅ preprocess() done")
-    return data_processed
+    return data, county_mapping, category_mapping
 
 
-def train(min_date:str = '2019-01-01',
-        max_date:str = '2024-12-31',
-        split_ratio: float = 0.083333333, # represents 1 year of the dataset
-        learning_rate=0.0105,
-        batch_size = 256,
-        patience = 10,
-        future_steps = future_steps
-    ) -> float:
+def preprocess(data):
+    print("🚀 Running preprocessing...")
 
-    """
-    - Download processed data from your BQ table (or from cache if it exists)
-    - Train on the preprocessed dataset (which should be ordered by date)
-    - Store training results and model weights
+    # Assign integer IDs first
+    data, county_mapping, category_mapping = assign_integer_ids(data)
 
-    Return val_mae as a float
-    """
+    # Drop unnecessary columns
+    drop_cols = ["county", "category_name", "date_week"]  # Drop categorical text and date
+    data = data.drop(columns=[col for col in drop_cols if col in data.columns])
 
-    print("\n⭐️ Use case: train")
-    print( "\nLoading preprocessed validation data...")
+    # Convert numeric columns to float32 (fix dtype issues)
+    numeric_cols = ["week_year", "week_of_year", "bottles_sold"]
+    for col in numeric_cols:
+        data[col] = pd.to_numeric(data[col], errors="coerce").astype(np.float32)
 
-    #min_date = parse(min_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
-    #max_date = parse(max_date).strftime('%Y-%m-%d') # e.g '2009-01-01'
+    # Ensure categorical IDs are int32
+    data["county_id"] = data["county_id"].astype(np.int32)
+    data["category_id"] = data["category_id"].astype(np.int32)
 
-    # Load processed data using `get_data_with_cache` in chronological order
-    # Try it out manually on console.cloud.google.com first!
+    return data, county_mapping, category_mapping
 
-    query = f"""
-        SELECT 'hello world'
-        """
 
-    data = get_data_with_cache(GCP_PUBLIC_DATA,
-        query,
-        cache_path=Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv"),
-        data_has_header=True
-    )
 
-    data = data.query(f"remainder__date_week >= '{min_date}' and remainder__date_week <= '{max_date}' ")
+def train(data_processed, county_mapping, category_mapping):
+    print("🔍 Processing training data...")
 
-    #tomar solo 10% de la data
-    #data = data.sample(frac=0.4, random_state=42)  # Tomar solo el 10% de los datos
-    columnas_target = data[["bottles_sold"]].copy()
-    columnas_apoyo = data[['category_name','county','sin_MoSold', 'cos_MoSold']].copy()
+    # Convert `county_id` and `category_id` to NumPy arrays
+    county_data = data_processed["county_id"].to_numpy(dtype=np.int32).reshape(-1, 1)
+    category_data = data_processed["category_id"].to_numpy(dtype=np.int32).reshape(-1, 1)
 
-    data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
-    data_preproc = data_preproc.drop('remainder__date_week', axis=1)
-    print(f"creando secuencias para modelo RNN...")
-    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=past_steps, future_steps=future_steps)
-    print("✅ Secuencias creadas ")
+    # Ensure bottles_sold is the first column before converting to numpy
+    numeric_data = data_processed[["bottles_sold", "week_year", "week_of_year"]].to_numpy(dtype=np.float32)
 
-    split_index = int((1-split_ratio) * len(X))
-    X_train, X_val = X[:split_index], X[split_index:]
+
+    #Print shape checks before sequence creation
+    print(f"🔍 numeric_data.shape: {numeric_data.shape}")
+    print(f"🔍 county_data.shape: {county_data.shape}")
+    print(f"🔍 category_data.shape: {category_data.shape}")
+
+    # Create sequences
+    # Create sequences
+    X_dict, y = create_sequences_fixed(numeric_data, county_data, category_data, past_steps=52, future_steps=12)
+
+    # Train/Validation Split (80/20)
+    split_index = int(len(y) * 0.8)
+
+    # Unpack dictionary properly
+    X_train = {key: value[:split_index] for key, value in X_dict.items()}
+    X_val = {key: value[split_index:] for key, value in X_dict.items()}
     y_train, y_val = y[:split_index], y[split_index:]
-    print("✅ Train/Val Split created ")
 
-    print("Input shape X train completo:", X_train.shape)
-    print("Input shape y train completo:", y_train.shape)
-    print("Input shape X train[1:]:", X_train.shape[1:])
-    print("Input shape X val completo:", X_val.shape)
-    print("Input shape y train completo:",y_train.shape)
-    print("Input shape y val completo:",y_val.shape)
+    print("🔍 y_train sample:\n", y_train[:10])
+    print("🔍 y_val sample:\n", y_val[:10])
 
-    print(f"inicializando modelo")
-    model = initialize_model(input_shape=X_train.shape[1:], future_steps=future_steps)
-    model = compile_model(model, learning_rate=learning_rate)
+    # Print shapes before model training
+    print(f"✅ X_train['numeric_features'].shape: {X_train['numeric_features'].shape}")  # (batch, 52, num_features)
+    print(f"✅ X_train['county_id'].shape: {X_train['county_id'].shape}")  # (batch, 1)
+    print(f"✅ X_train['category_id'].shape: {X_train['category_id'].shape}")  # (batch, 1)
+    print(f"✅ y_train.shape: {y_train.shape}")
 
-    print("✅ Model compiled succesfully")
+    # Initialize Model
+    model = initialize_model(input_shape=X_train["numeric_features"].shape[1:],
+                             num_counties=len(county_mapping),
+                             num_categories=len(category_mapping))
 
-    model,history = train_model(
-        model,
-        X_train,
-        y_train,
-        batch_size=batch_size,
-        patience=patience,
-        validation_data=(X_val, y_val)
-    )
+    # Compile & Train
+    model = compile_model(model)
+    model, history = train_model(model, X_train, y_train, validation_data=(X_val, y_val))
 
-    if 'val_mae' in history.history:
-        val_mae = np.min(history.history['val_mae'])
-    else:
-        val_mae = np.min(history.history['val_loss'])  # Use validation loss instead
-
-    print("val_mae:", val_mae)
-
-    # params = dict(
-    #     context="train",
-    #     row_count=len(X_train),
-    # )
-
-    # Save results on the hard drive using taxifare.ml_logic.registry
-    #save_results(params=params, metrics=dict(mae=val_mae))
-
-    # Save model weight on the hard drive (and optionally on GCS too!)
     save_model(model=model)
+    print("✅ Model training complete!")
+    return model, X_val, y_val, county_mapping, category_mapping
 
-    print("✅ train() done \n")
-
-    return val_mae, X_val, y_train, y_val
 
 
 def evaluate(*args) -> float:
@@ -391,13 +349,76 @@ def prepare_data_to_visualization():
     dummy_data_df = pd.concat([dummy_data, dummy_data2], axis=0)
     return dummy_data_df
 
+def predict_on_validation(model, X_val, county_mapping, category_mapping):
+    print("🔍 Generating validation predictions...")
+    y_pred = model.predict(X_val)
+
+    # Convert ID back to names
+    county_id_to_name = {v: k for k, v in county_mapping.items()}
+    category_id_to_name = {v: k for k, v in category_mapping.items()}
+
+    counties = [county_id_to_name[idx[0]] for idx in X_val["county_id"]]
+    categories = [category_id_to_name[idx[0]] for idx in X_val["category_id"]]
+
+    # Create a DataFrame for easy analysis
+    df_predictions = pd.DataFrame({
+        "county": counties,
+        "category": categories,
+        "actual": y_val.mean(axis=1),
+        "predicted": y_pred.mean(axis=1)
+    })
+
+    return df_predictions
+
+
+import matplotlib.pyplot as plt
+
+import matplotlib.pyplot as plt
+
+def plot_predictions(df_predictions, county, category):
+    """
+    Plot actual vs predicted values for a given county and category.
+
+    Parameters:
+    - df_predictions: DataFrame containing "county", "category", "actual", and "predicted".
+    - county: The county name to filter.
+    - category: The category name to filter.
+    """
+
+    # Filter for the selected county and category
+    df_filtered = df_predictions[(df_predictions["county"] == county) &
+                                 (df_predictions["category"] == category)]
+
+    if df_filtered.empty:
+        print(f"No data found for {county} - {category}")
+        return
+
+    plt.figure(figsize=(10, 5))
+
+    # Plot actual vs. predicted
+    plt.plot(df_filtered.index, df_filtered["actual"], marker='o', label="Actual Sales")
+    plt.plot(df_filtered.index, df_filtered["predicted"], linestyle="dashed", marker='x', label="Predicted Sales")
+
+    plt.xlabel("Sample Index")  # No date, just using index
+    plt.ylabel("Bottles Sold")
+    plt.title(f"Actual vs. Predicted Sales ({county} - {category})")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+
 if __name__ == '__main__':
-    #data = get_data()
-    #preprocess(data)
-    train()
-    #print(pred(X_val))
-    pred(past_steps=past_steps, future_steps=future_steps)
-    #data = prepare_data_to_visualization()
-    # print(f"{data.shape=}")
-    # print(data.head())
-    # print(data.tail())
+
+    data = get_data()
+
+    data_processed, county_mapping, category_mapping = preprocess(data)
+
+    # Train Model
+    model, X_val, y_val, county_mapping, category_mapping = train(data_processed, county_mapping, category_mapping)
+
+    # Predict on Validation
+    df_predictions = predict_on_validation(model, X_val, county_mapping, category_mapping)
+
+    # Plot Results for a specific county & category
+    plot_predictions(df_predictions, county="POLK", category="WHISKY")

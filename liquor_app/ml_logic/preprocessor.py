@@ -11,41 +11,42 @@ from sklearn.preprocessing import OneHotEncoder, FunctionTransformer, RobustScal
 from liquor_app.ml_logic.encoders import transform_numeric_features
 
 
-def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
+
+def assign_integer_ids(data: pd.DataFrame):
+    """Assign unique integer IDs to categorical variables instead of one-hot encoding."""
+    county_mapping = {county: idx for idx, county in enumerate(data["county"].unique())}
+    category_mapping = {category: idx for idx, category in enumerate(data["category_name"].unique())}
+
+    # Apply mappings
+    data["county_id"] = data["county"].map(county_mapping).astype(int)
+    data["category_id"] = data["category_name"].map(category_mapping).astype(int)
+
+    print(f"✅ Assigned integer IDs for counties and categories")
+
+    return data, county_mapping, category_mapping
+
+
+
+def preprocess_features(X: pd.DataFrame, is_train: bool) -> tuple:
+    """
+    Preprocess features:
+    - Convert county & category to integer IDs instead of one-hot encoding.
+    - Scale numeric features.
+    - Pass categorical IDs as is (for embeddings).
+    """
 
     def create_sklearn_preprocessor() -> ColumnTransformer:
-        """
-        Scikit-learn pipeline that transforms a cleaned dataset of shape (_, 7)
-        into a preprocessed one of fixed shape (_, 65).
+        # Keep only numeric features for scaling
+        numerical_features = ["week_year", "week_of_year", "bottles_sold"]
+        num_pipe = make_pipeline(RobustScaler())
 
-        Stateless operation: "fit_transform()" equals "transform()".
-        """
-
-        # CATEGORICAL PIPE
-        categorical_features = ['county', 'category_name']
-        cat_pipe = make_pipeline(
-            OneHotEncoder(
-                handle_unknown="ignore",
-                sparse_output=False
-            )
-        )
-
-        # NUMERIC PIPE
-        numerical_features = ['week_year','week_of_year','bottles_sold']
-        #numerical_features = ['week_year','week_of_year']
-        num_pipe = make_pipeline(
-            RobustScaler()
-        )
-        # COMBINED PREPROCESSOR
-
+        # No more one-hot encoding! Pass categorical IDs as they are.
         final_preprocessor = ColumnTransformer(
             [
-                ("cat_preproc", cat_pipe, categorical_features),
-                ("num_preproc", num_pipe,  numerical_features)
-
+                ("num_preproc", num_pipe, numerical_features)  # Only scale numeric features
             ],
-            n_jobs=-1,
-            remainder='passthrough'
+            remainder="passthrough",  # Keep county_id & category_id unchanged
+            n_jobs=-1
         )
 
         return final_preprocessor
@@ -56,10 +57,8 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
     if is_train:
         X_processed = preprocessor.fit_transform(X)
-        # Guardar el preprocesador en un archivo
         with open("preprocessor.pkl", "wb") as f:
             pickle.dump(preprocessor, f)
-
     else:
         with open("preprocessor.pkl", "rb") as f:
             preprocessor = pickle.load(f)
@@ -67,9 +66,12 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
     col_names = preprocessor.get_feature_names_out()
     print("✅ X_processed, with shape", X_processed.shape)
-    print(f'col_names from preprocessing before joins: {col_names}')
+    print(f'col_names after preprocessing: {col_names}')
 
-    return X_processed,col_names
+    return X_processed, col_names
+
+
+
 
 # crear secuencias de RNN
 def create_sequences(df, past_steps=10, future_steps=1):
@@ -114,3 +116,32 @@ def create_sequences_inference(data_preproc, past_steps=52):
                 X_pred.append(df_filtrado.iloc[-past_steps:].values)  # Last x weeks
 
     return np.array(X_pred)  # Shape: (num_groups, past_steps, num_features)
+
+
+def create_sequences_fixed(numeric_data, county_data, category_data, past_steps=10, future_steps=1):
+    """
+    Create sequences for RNN:
+    - Uses numeric features (past sales & week info).
+    - Keeps county_id & category_id separate for embeddings.
+    - Ensures targets are correctly aligned.
+    """
+
+    X_numeric, X_county, X_category, y = [], [], [], []
+
+    # 🚨 Iterate over dataset to extract sequences
+    for i in range(len(numeric_data) - past_steps - future_steps):
+        # Extract numeric features
+        X_numeric.append(numeric_data[i : i + past_steps])
+
+        # Extract categorical inputs (county & category) (🚨 Fix shape)
+        X_county.append(county_data[i])  # Only take 1 value per sequence
+        X_category.append(category_data[i])  # Only take 1 value per sequence
+
+        # Extract targets (future sales values)
+        y.append(numeric_data[i + past_steps : i + past_steps + future_steps, 0])  # First column = bottles_sold
+
+    return {
+        "numeric_features": np.array(X_numeric, dtype=np.float32),
+        "county_id": np.array(X_county, dtype=np.int32).reshape(-1, 1),  # 🚨 Ensure shape (batch_size, 1)
+        "category_id": np.array(X_category, dtype=np.int32).reshape(-1, 1)  # 🚨 Ensure shape (batch_size, 1)
+    }, np.array(y, dtype=np.float32)
