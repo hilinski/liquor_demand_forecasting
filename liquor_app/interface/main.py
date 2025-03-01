@@ -15,6 +15,7 @@ from liquor_app.ml_logic.model import initialize_model, compile_model, train_mod
 from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre, create_sequences_inference
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
 
+past_steps = 52
 future_steps = 12
 
 def get_data(min_date='2013-01-01', max_date='2025-01-31'):
@@ -150,7 +151,7 @@ def preprocess(data) -> None:
 
 def train(min_date:str = '2013-01-01',
         max_date:str = '2024-12-31',
-        split_ratio: float = 0.083333333, # 0.02 represents ~ 1 month of validation data on a 2009-2015 train set
+        split_ratio: float = 0.083333333, # represents 1 year of the dataset
         learning_rate=0.0005,
         batch_size = 128,
         patience = 20,
@@ -194,7 +195,7 @@ def train(min_date:str = '2013-01-01',
     data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
     data_preproc = data_preproc.drop('remainder__date_week', axis=1)
     print(f"creando secuencias para modelo RNN...")
-    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=52, future_steps=future_steps)
+    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=past_steps, future_steps=future_steps)
     print("✅ Secuencias creadas ")
 
     split_index = int((1-split_ratio) * len(X))
@@ -250,7 +251,7 @@ def train(min_date:str = '2013-01-01',
 def evaluate(*args) -> float:
     pass
 
-def pred(X_pred:np.ndarray = None,  past_steps=52, future_steps=future_steps) -> pd.DataFrame:
+def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_steps) -> pd.DataFrame:
 
     if X_pred is None:
         query = """SELECT 'hello world'"""
@@ -326,7 +327,7 @@ def pred(X_pred:np.ndarray = None,  past_steps=52, future_steps=future_steps) ->
 
 
         # 4. Append predictions to raw data
-        df_pred_filter = df_pred[['date_week','county', 'category_name','bottles_sold']]
+        df_pred_filter = df_pred[['date_week','county', 'category_name','bottles_sold']].copy()
         df_pred_filter["is_predict"] = False
         predictions_df["is_predict"] = True
         df_combined = pd.concat([df_pred_filter, predictions_df], ignore_index=True)
@@ -341,7 +342,7 @@ def pred(X_pred:np.ndarray = None,  past_steps=52, future_steps=future_steps) ->
         print("✅  DF Combined Output:")
         print(df_combined.head(10))
 
-        aux = data.query(f"date_week >= '2024-01-01' and date_week <= '2025-01-31' ")
+        aux = data.query(f"date_week >= '2024-01-01' and date_week <= '2025-01-31' ").copy()
         aux["is_predict"] = False
         aux_real = aux[aux['date_week']>="2025-01-01"]
         y_real = aux_real[['date_week','county', 'category_name','bottles_sold','is_predict']]
@@ -351,7 +352,9 @@ def pred(X_pred:np.ndarray = None,  past_steps=52, future_steps=future_steps) ->
 
         print("✅  Y Combined Output:")
         print(y_combined.head(10))
-
+        # Store as CSV if the BQ query returned at least one valid line
+        if y_combined.shape[0] > 1:
+            y_combined.to_csv(Path(PRED_DATA_PATH).joinpath("data.csv"), header=True, index=False)
         return y_combined
 
 
@@ -383,9 +386,9 @@ def prepare_data_to_visualization():
 if __name__ == '__main__':
     #data = get_data()
     #preprocess(data)
-    #val_mae, X_val = train()
+    #train()
     #print(pred(X_val))
-    pred(past_steps=52, future_steps=12)
+    pred(past_steps=past_steps, future_steps=future_steps)
     #data = prepare_data_to_visualization()
     # print(f"{data.shape=}")
     # print(data.head())
