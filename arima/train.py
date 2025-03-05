@@ -217,13 +217,17 @@ def pred(df_train, df_test, category_name):
     df_pred.set_index(['date'], inplace=True)
     df_train['is_pred'] = False
     df_consolidado = pd.concat([df_pred,df_train],axis=0)
+    df_consolidado = df_consolidado.reset_index()
+    df_consolidado['category_name'] = category_name
     return df_consolidado
-
 
 if __name__ == '__main__':
     df = get_data(cache_path = RAW_DATA_ARIMA_PATH)
     df_demand = preprocess(df)
-    category_name = 'RUM'
-    df_train, df_test = train(df_demand,category_name)
-    df_consolidado = pred(df_train, df_test, category_name)
-    print(df_consolidado)
+    df_final = pd.DataFrame()
+    for category_name in ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS']:
+        print(f"Empezando entrenamiento de {category_name}")
+        df_train, df_test = train(df_demand,category_name)
+        df_consolidado = pred(df_train, df_test, category_name)
+        df_final = pd.concat([df_final, df_consolidado], axis=0)
+    print(df_final)
