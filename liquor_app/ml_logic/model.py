@@ -8,64 +8,14 @@ print("\nLoading TensorFlow...")
 start = time.perf_counter()
 
 from tensorflow import keras
-from keras import Model, Sequential, layers, regularizers, optimizers
+from keras import Model, optimizers
 from keras.callbacks import EarlyStopping
-from tensorflow.keras.models import Sequential
-from tensorflow.keras import layers
-from tensorflow.keras.layers import SimpleRNN, Flatten, LSTM, Input, Dropout, Embedding, Concatenate, RepeatVector, Input, Reshape, LSTM, Dropout, Dense
-from tensorflow.keras.layers import Normalization
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import Huber, LogCosh
+from tensorflow.keras.layers import LSTM, Input, Dropout, Embedding, Concatenate, RepeatVector, Input, Reshape, Dropout, Dense, Attention, Bidirectional, BatchNormalization
 
 end = time.perf_counter()
 print(f"\n✅ TensorFlow loaded ({round(end - start, 2)}s)")
-
-
-from tensorflow.keras.layers import Embedding, Concatenate, RepeatVector, Input, Reshape, LSTM, Dropout, Dense
-
-def initialize_model(input_shape: tuple, future_steps: int = 12, num_counties: int = 11, num_categories: int = 21) -> Model:
-    """
-    Initialize the Neural Network:
-    - Adds Embedding layers for county and category.
-    - Expands embeddings to match time steps (52).
-    """
-
-    # Define inputs
-    county_input = Input(shape=(1,), name="county_id")  # Single number input for county
-    category_input = Input(shape=(1,), name="category_id")  # Single number input for category
-    numeric_input = Input(shape=input_shape, name="numeric_features")  # Shape: (52, num_features)
-
-    # Add Embeddings
-    county_embedding = Embedding(input_dim=num_counties, output_dim=4)(county_input)  # Shape: (None, 1, 4)
-    category_embedding = Embedding(input_dim=num_categories, output_dim=4)(category_input)  # Shape: (None, 1, 4)
-
-    # Fix: Ensure correct reshape (remove extra dimension)
-    county_embedding = Reshape((4,))(county_embedding)  # Now (None, 4)
-    category_embedding = Reshape((4,))(category_embedding)  # Now (None, 4)
-
-    # Fix: Use `RepeatVector()` with correct shape
-    county_embedding = RepeatVector(input_shape[0])(county_embedding)  # Now (None, 52, 4)
-    category_embedding = RepeatVector(input_shape[0])(category_embedding)  # Now (None, 52, 4)
-
-    # Merge inputs (numeric + embeddings)
-    merged_inputs = Concatenate(axis=-1)([county_embedding, category_embedding, numeric_input])  # Shape: (None, 52, num_features + 8)
-
-    # RNN Layers
-    rnn_layer = LSTM(units=64, activation="tanh", return_sequences=True)(merged_inputs)
-    rnn_layer = Dropout(0.1)(rnn_layer)
-    rnn_layer = LSTM(units=32, activation="tanh")(rnn_layer)
-    rnn_layer = Dropout(0.1)(rnn_layer)
-
-    # Fully Connected Layers
-    dense_layer = Dense(128, activation="relu")(rnn_layer)
-    dense_layer = Dense(64, activation="relu")(dense_layer)
-    output_layer = Dense(future_steps, activation="linear")(dense_layer)
-
-    # Create Model
-    model = Model(inputs=[county_input, category_input, numeric_input], outputs=output_layer)
-
-    print("✅ Model initialized with expanded embeddings")
-
-    return model
-
 
 
 
@@ -77,8 +27,53 @@ def compile_model(model: Model, learning_rate=0.0005) -> Model:
     model.compile(loss="mean_squared_error", optimizer=optimizer, metrics=["mae"])
 
     print("✅ Model compiled")
+    return model
+
+
+def initialize_model(input_shape: tuple, future_steps: int = 12, num_categories: int = 21) -> Model:
+    """
+    Simplified Neural Network for Category-Level Forecasting:
+    - Removes `county_id` input and embeddings
+    - Keeps `category_id` embeddings
+    - Uses fewer LSTM layers for efficiency
+    - Retains Batch Normalization & Dropout for stability
+    """
+
+    # 🔹 Define Inputs (NO COUNTY)
+    category_input = Input(shape=(1,), name="category_id")
+    numeric_input = Input(shape=input_shape, name="numeric_features")
+
+    # 🔹 Embedding Layer (ONLY Category)
+    category_embedding = Embedding(input_dim=num_categories, output_dim=4)(category_input)
+    category_embedding = Reshape((4,))(category_embedding)
+    category_embedding = RepeatVector(input_shape[0])(category_embedding)  # Expand to match time steps
+
+    # 🔹 Merge Inputs (Only Category & Numeric Features)
+    merged_inputs = Concatenate(axis=-1)([category_embedding, numeric_input])
+
+    # 🔹 Reduced LSTM Layers (Only 2)
+    rnn_layer = Bidirectional(LSTM(units=48, activation="tanh", return_sequences=True))(merged_inputs)
+    rnn_layer = BatchNormalization()(rnn_layer)
+    rnn_layer = Dropout(0.15)(rnn_layer)
+
+    rnn_layer = Bidirectional(LSTM(units=24, activation="tanh"))(rnn_layer)
+    rnn_layer = BatchNormalization()(rnn_layer)
+    rnn_layer = Dropout(0.15)(rnn_layer)
+
+    # 🔹 Dense Layers
+    dense_layer = Dense(64, activation="relu")(rnn_layer)
+    dense_layer = Dense(32, activation="relu")(dense_layer)
+    output_layer = Dense(future_steps, activation="linear")(dense_layer)
+
+    # 🔹 Create Model (Only Category & Numeric Features)
+    model = Model(inputs=[category_input, numeric_input], outputs=output_layer)
+
+    print("✅ Model initialized for Category-Level Forecasting (No County)")
 
     return model
+
+
+
 
 def train_model(
         model: Model,
@@ -86,8 +81,8 @@ def train_model(
         y: np.ndarray,
         batch_size=256,
         patience=2,
-        validation_data=None, # overrides validation_split
-        validation_split=0.3
+        validation_data=None,
+        validation_split=0.2
     ) -> Tuple[Model, dict]:
     """
     Fit the model and return a tuple (fitted_model, history)
@@ -106,7 +101,7 @@ def train_model(
             X,
             y,
             validation_data=validation_data,
-            epochs=100,
+            epochs=50,
             batch_size=batch_size,
             callbacks=[es],
             verbose=1
@@ -116,7 +111,7 @@ def train_model(
             X,
             y,
             validation_split=validation_split,
-            epochs=100,
+            epochs=50,
             batch_size=batch_size,
             callbacks=[es],
             verbose=1
