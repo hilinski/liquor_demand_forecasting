@@ -23,6 +23,7 @@ from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 RAW_DATA_ARIMA_PATH = Path(RAW_DATA_PATH).joinpath("data.csv")
+PROCESSED_DATA_ARIMA_PATH = Path(PROCESSED_DATA_PATH).joinpath("data.csv")
 
 def adf_test(series):
     result = adfuller(series.dropna())
@@ -119,6 +120,7 @@ def get_data(cache_path, min_date='2013-01-01',max_date='2025-01-31'):
               select date, category_name,
               sum(bottles_sold) as bottles_sold
                from data_combinations
+               where date >= '{min_date}' and date <= '{max_date}'
                group by 1,2
                order by date asc, category_name asc
 
@@ -129,7 +131,6 @@ def get_data(cache_path, min_date='2013-01-01',max_date='2025-01-31'):
         result = query_job.result()
         df = result.to_dataframe()
         df.to_csv(cache_path, header=True, index=False)
-
     return df
 
 
@@ -139,17 +140,18 @@ def preprocess(df):
     df.date = pd.to_datetime(df.date)
     df.set_index(['date'], inplace=True)
     df_demand = df.resample("ME")[["bottles_sold"]].sum()
+    df_demand.to_csv(PROCESSED_DATA_ARIMA_PATH, header=True, index=True)
     return df_demand
 
-def train(df_demand,category_name):
+def train(df_demand,category_name,year=2024):
 ##CREAR EL FOR ACA
     #decomposition
     result_add = seasonal_decompose(df_demand["bottles_sold"], model='additive', period= 12)
     m=12
 
     #train test split
-    df_train = df_demand[df_demand.index.year < 2024].copy()
-    df_test = df_demand[df_demand.index.year >= 2024].copy()
+    df_train = df_demand[df_demand.index.year < year].copy()
+    df_test = df_demand[(df_demand.index.year >= year) & (df_demand.index.year < year+1)].copy()
 
     #stationarity
     df_demand_diff = df_train.diff().dropna()
@@ -168,19 +170,28 @@ def train(df_demand,category_name):
 
     model = SARIMAX(df_demand_diff2, order=(p,0,q), seasonal_order=(1,1,1,m))
     sarima_result = model.fit(maxiter=1000)
-    print(f"Model trained for category {category_name}!")
+    print(f"Model trained for category {category_name} for year {year}!")
 
-    with open(Path(ARIMA_MODELS_PATH).joinpath(f"{category_name}.pkl"), "wb") as f:
+    with open(Path(ARIMA_MODELS_PATH).joinpath(f"{category_name}_{year}.pkl"), "wb") as f:
         pickle.dump(sarima_result, f)
-        print(f"Model saved in pickle for {category_name}")
+        print(f"Model saved in pickle for {category_name} year {year}.")
 
-    return df_train, df_test
+    return None
 
 
-def pred(df_train, df_test, category_name):
-    with open(Path(ARIMA_MODELS_PATH).joinpath(f"{category_name}.pkl"), "rb") as f:
+def pred(category_name,year):
+    with open(Path(ARIMA_MODELS_PATH).joinpath(f"{category_name}_{year}.pkl"), "rb") as f:
         sarima_result = pickle.load(f)
         print(f"Model loaded for {category_name}")
+
+    df_demand = pd.read_csv(PROCESSED_DATA_ARIMA_PATH, header='infer')
+    df_demand.date = pd.to_datetime(df_demand.date)
+    df_demand.set_index(['date'], inplace=True)
+    df_demand = df_demand.resample("ME")[["bottles_sold"]].sum()
+
+    #train test split
+    df_train = df_demand[df_demand.index.year < year].copy()
+    df_test = df_demand[(df_demand.index.year >= year) & (df_demand.index.year < year+1)].copy()
 
     # Forecast for the next 12 periods on the differenced data
     forecast_diff2 = sarima_result.get_forecast(steps=12)
@@ -205,11 +216,11 @@ def pred(df_train, df_test, category_name):
     # Slice to ensure forecast only contains the last 12 values
     forecast_original = forecast_original[-12:]
 
-    mae = abs(forecast_original.values - df_test.bottles_sold.values[:-1]).mean()
-    print(f"MAE for {category_name}: {mae}")
-
-    mre = abs((forecast_original.values - df_test.bottles_sold.values[:-1])/df_test.bottles_sold.values[:-1]).mean()
-    print(f"MRE for {category_name}: {mre}")
+    #mae = abs(forecast_original.values - df_test.bottles_sold.values[:-1]).mean()
+    #print(f"MAE for {category_name}: {mae}")
+#
+    #mre = abs((forecast_original.values - df_test.bottles_sold.values[:-1])/df_test.bottles_sold.values[:-1]).mean()
+    #print(f"MRE for {category_name}: {mre}")
 
     df_pred = forecast_original.to_frame().reset_index()
     df_pred.rename(columns={'index':'date','predicted_mean':'bottles_sold'}, inplace=True)
@@ -221,28 +232,24 @@ def pred(df_train, df_test, category_name):
     df_consolidado['category_name'] = category_name
     return df_consolidado
 
-def prepare_data_to_visualization():
+
+def train_all(all_categories = ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS'], year = 2024):
     df = get_data(cache_path = RAW_DATA_ARIMA_PATH)
     df_demand = preprocess(df)
+    for category_name in all_categories:
+        print(f"Empezando entrenamiento de {category_name} para año {year}")
+        train(df_demand,category_name,year)
+    print(f"Training Done!")
+    return None
+
+def prepare_data_to_visualization(all_categories = ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS'], year = 2024):
     df_final = pd.DataFrame()
-    # category_name = 'RUM'
-    for category_name in ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS']:
-        print(f"Empezando entrenamiento de {category_name}")
-        df_train, df_test = train(df_demand,category_name)
-        df_consolidado = pred(df_train, df_test, category_name)
+    for category_name in all_categories:
+        df_consolidado = pred(category_name, year)
         df_final = pd.concat([df_final, df_consolidado], axis=0)
-        
-    print(df_final)
-    
     return df_final
-        
+
 if __name__ == '__main__':
-    df = get_data(cache_path = RAW_DATA_ARIMA_PATH)
-    df_demand = preprocess(df)
-    df_final = pd.DataFrame()
-    for category_name in ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS']:
-        print(f"Empezando entrenamiento de {category_name}")
-        df_train, df_test = train(df_demand,category_name)
-        df_consolidado = pred(df_train, df_test, category_name)
-        df_final = pd.concat([df_final, df_consolidado], axis=0)
+    #train_all(year=2024)
+    df_final = prepare_data_to_visualization()
     print(df_final)
