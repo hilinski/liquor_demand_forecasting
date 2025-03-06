@@ -12,7 +12,7 @@ MLFLOW_MODEL_NAME = os.environ.get("MLFLOW_MODEL_NAME")
 ROOT_DIR = Path(__file__).parent.parent
 RAW_DATA_PATH = Path(ROOT_DIR).joinpath("data","arima","raw")
 ARIMA_MODELS_PATH = Path(ROOT_DIR).joinpath("arima_models")
-#PROCESSED_DATA_PATH = Path(ROOT_DIR).joinpath("data","processed")
+PROCESSED_DATA_PATH = Path(ROOT_DIR).joinpath("data","arima","processed")
 #PRED_DATA_PATH = Path(ROOT_DIR).joinpath("data","pred")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME")
