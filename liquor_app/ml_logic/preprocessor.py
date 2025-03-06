@@ -3,6 +3,7 @@ import pandas as pd
 import pickle
 
 import datetime
+from liquor_app.params import *
 
 from sklearn.pipeline import make_pipeline
 from sklearn.compose import ColumnTransformer
@@ -11,16 +12,22 @@ from sklearn.preprocessing import OneHotEncoder, FunctionTransformer, RobustScal
 from liquor_app.ml_logic.encoders import transform_numeric_features
 
 
-def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
+import os
+import pickle
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
+from sklearn.pipeline import make_pipeline
+
+def preprocess_features(X: pd.DataFrame, is_train: bool, county: object, category: object) -> tuple:
+    """
+    Preprocess features with separate preprocessor per county and category.
+    Saves preprocessor as 'county-category-preprocessor.pkl'.
+    """
 
     def create_sklearn_preprocessor() -> ColumnTransformer:
         """
-        Scikit-learn pipeline that transforms a cleaned dataset of shape (_, 7)
-        into a preprocessed one of fixed shape (_, 65).
-
-        Stateless operation: "fit_transform()" equals "transform()".
+        Scikit-learn pipeline that transforms a cleaned dataset into a preprocessed one.
         """
-
         # CATEGORICAL PIPE
         categorical_features = ['county', 'category_name']
         cat_pipe = make_pipeline(
@@ -31,16 +38,14 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
         )
 
         # NUMERIC PIPE
-        numerical_features = ['week_year','week_of_year','bottles_sold']
-        #numerical_features = ['week_year','week_of_year']
+        numerical_features = ['week_year', 'week_of_year', 'bottles_sold']
         num_pipe = make_pipeline(MinMaxScaler(feature_range=(0.1, 1)))
-        # COMBINED PREPROCESSOR
 
+        # COMBINED PREPROCESSOR
         final_preprocessor = ColumnTransformer(
             [
                 ("cat_preproc", cat_pipe, categorical_features),
-                ("num_preproc", num_pipe,  numerical_features)
-
+                ("num_preproc", num_pipe, numerical_features)
             ],
             n_jobs=-1,
             remainder='passthrough'
@@ -52,22 +57,43 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
 
     preprocessor = create_sklearn_preprocessor()
 
+
+    # Clean county and category name for safe file naming (remove extra spaces, special characters)
+    county_clean = county.replace(" ", "_").replace("-", "_").replace(",", "_").replace("'", "_")
+    category_clean = category.replace(" ", "_").replace("-", "_").replace(",", "_").replace("'", "_")
+
+    # Create processor path
+    preprocessor_path = Path(PROCESOR_LOCAL_PATH).joinpath(f"{county_clean}-{category_clean}-preprocessor.pkl")
+
+    # Debugging: Print the path to be used
+    print(f"Saving/loading preprocessor at: {preprocessor_path}")
+
     if is_train:
+        print("Entro")
         X_processed = preprocessor.fit_transform(X)
-        # Guardar el preprocesador en un archivo
-        with open("preprocessor.pkl", "wb") as f:
+        # Save the preprocessor for the specific county and category
+        os.makedirs(os.path.dirname(preprocessor_path), exist_ok=True)  # Ensure the directory exists
+        with open(preprocessor_path, "wb") as f:
             pickle.dump(preprocessor, f)
+        print(f"Preprocessor saved at: {preprocessor_path}")
 
     else:
-        with open("preprocessor.pkl", "rb") as f:
-            preprocessor = pickle.load(f)
+        # Load the preprocessor for the specific county and category
+        if os.path.exists(preprocessor_path):
+            with open(preprocessor_path, "rb") as f:
+                preprocessor = pickle.load(f)
+            print(f"Preprocessor loaded from: {preprocessor_path}")
+        else:
+            raise FileNotFoundError(f"Preprocessor file not found for {county} - {category} at {preprocessor_path}")
+
         X_processed = preprocessor.transform(X)
 
     col_names = preprocessor.get_feature_names_out()
     print("✅ X_processed, with shape", X_processed.shape)
     print(f'col_names from preprocessing before joins: {col_names}')
 
-    return X_processed,col_names
+    return X_processed, col_names
+
 
 # crear secuencias de RNN
 def create_sequences(df, past_steps=52, future_steps=12):

@@ -7,7 +7,7 @@ from pathlib import Path
 from dateutil.parser import parse
 import seaborn as sns
 import matplotlib.pyplot as plt
-from pivottablejs import pivot_ui
+#from pivottablejs import pivot_ui
 from google.cloud import bigquery
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -186,9 +186,17 @@ def pred(df_train, df_test, category_name):
     forecast_diff2 = sarima_result.get_forecast(steps=12)
     forecast_diff2_values = forecast_diff2.predicted_mean
 
+    ####### CHECK ######
+
     # Create forecast index for the next 12 months
     forecast_index = pd.date_range(start=df_train.index[-1] + pd.DateOffset(months=1),
                                    periods=12, freq="M")
+
+    # Create forecast index (Ensure it aligns with df_test)
+    forecast_index = df_test.index[:12]  # Use first 12 indices of df_test
+
+
+    ####### CHECK ######
 
     # Reverse the second differencing (d=2 → d=1)
     # The forecast_diff2_values should be added to the last value of the first differenced data
@@ -202,8 +210,23 @@ def pred(df_train, df_test, category_name):
     last_value = df_train.iloc[-1]  # Last actual value of the original data
     forecast_original = forecast_diff1_values.cumsum() + float(last_value)
 
+
+    # Step 1: Reverse second differencing (d=2 → d=1)
+    last_diff1 = df_train.iloc[-1] - df_train.iloc[-2]  # Last first-difference value
+    forecast_diff1_values = forecast_diff2_values.cumsum() + last_diff1  # Revert second differencing
+
+    # Step 2: Reverse first differencing (d=1 → Original Scale)
+    last_value = df_train.iloc[-1]  # Last actual value in original scale
+    forecast_original = forecast_diff1_values.cumsum() + last_value  # Revert first differencing
+
+    ####### CHECK ######
+
     # Slice to ensure forecast only contains the last 12 values
     forecast_original = forecast_original[-12:]
+
+    # Ensure forecast has the correct index
+    forecast_original = pd.Series(forecast_original.values, index=forecast_index)
+
 
     mae = abs(forecast_original.values - df_test.bottles_sold.values[:-1]).mean()
     print(f"MAE for {category_name}: {mae}")
@@ -228,6 +251,6 @@ if __name__ == '__main__':
     for category_name in ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS']:
         print(f"Empezando entrenamiento de {category_name}")
         df_train, df_test = train(df_demand,category_name)
-        df_consolidado = pred(df_train, df_test, category_name)
-        df_final = pd.concat([df_final, df_consolidado], axis=0)
+        #df_consolidado = pred(df_train, df_test, category_name)
+        #df_final = pd.concat([df_final, df_consolidado], axis=0)
     print(df_final)

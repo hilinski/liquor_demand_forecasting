@@ -48,6 +48,7 @@ def save_model(model: keras.Model = None, county='POLK', category='RUM') -> None
     model_path = os.path.join(MODEL_LOCAL_PATH, "models", f"{county}-{category}.h5")
     model.save(model_path)
 
+
     print("✅ Model saved locally")
 
     if MODEL_TARGET == "gcs":

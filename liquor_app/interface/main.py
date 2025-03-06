@@ -120,41 +120,59 @@ def get_data(min_date='2013-01-01', max_date='2025-01-31'):
 def preprocess(data) -> None:
     month_in_year = 12
     data['date_week'] = pd.to_datetime(data['date_week'])
+    data = data.query(f"date_week >= '2013-01-01' and date_week <= '2023-12-31' ").copy()
     data['num_month'] = data['date_week'].dt.month
     data['sin_MoSold'] = np.sin(2*np.pi*data.num_month/month_in_year)
     data['cos_MoSold'] = np.cos(2*np.pi*data.num_month/month_in_year)
     data = data.drop('num_month', axis=1)
     data["bottles_sold"] = np.log1p(data["bottles_sold"])
-    columnas_target = data[["bottles_sold"]]
-    columnas_apoyo = data[['category_name','county','sin_MoSold','cos_MoSold']]
     print("Data shape a procesar", data.shape)
-    data_processed,col_names = preprocess_features(data,True)
-    print("✅ Data Proccesed ")
 
-    # Load a DataFrame onto BigQuery containing [pickup_datetime, X_processed, y]
-    # using data.load_data_to_bq()
-
-    data_processed = pd.DataFrame(
-        data_processed,
-        columns=col_names
+    unique_pairs = (
+            data[['county', 'category_name']]
+            .drop_duplicates()
+            .dropna()
+            .reset_index(drop=True)
     )
-
-    data_processed = pd.concat([data_processed, columnas_apoyo, columnas_target], axis="columns", sort=False)
-    data_processed.columns = data_processed.columns.str.replace(" ", "_")
-    # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
-    # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+    #unique_pairs_10 = unique_pairs.iloc[:3,:]
+    final_preproces_data  = pd.DataFrame()
+    for (county, category) in unique_pairs.itertuples(index=False):
+        data_processed = data[(data["county"] == county) & (data["category_name"] == category)]
+        columnas_target = data_processed[["bottles_sold"]]
+        columnas_apoyo = data_processed[['category_name','county','sin_MoSold','cos_MoSold']]
+        data_processed,col_names = preprocess_features(data, True, county, category)
+        print("✅ Data Proccesed ")
+        data_processed = pd.DataFrame(data_processed, columns=col_names)
+        data_processed = pd.concat([data_processed, columnas_apoyo, columnas_target], axis="columns", sort=False)
+        data_processed.columns = data_processed.columns.str.replace(" ", "_")
+        # Combine all predictions into a single DataFrame
+        final_preproces_data = pd.concat([final_preproces_data, data_processed], ignore_index=True)
 
     processed_path = Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv")
-    data_processed.to_csv(processed_path, header=True, index=False)
+    final_preproces_data.to_csv(processed_path, header=True, index=False)
 
     print(f"✅ Raw data saved as {RAW_DATA_PATH}")
     print(f"✅ Processed data saved as {PROCESSED_DATA_PATH}")
     print("✅ preprocess() done")
-    return data_processed
+    return final_preproces_data
+
+
+    # data_processed = pd.concat([data_processed, columnas_apoyo, columnas_target], axis="columns", sort=False)
+    # data_processed.columns = data_processed.columns.str.replace(" ", "_")
+    # # data_processed.rename(columns={'remainder__date_ordinal':'date_ordinal'}, inplace=True)
+    # # #data_processed = pd.DataFrame(np.concatenate((dates, X_processed, y), axis=1))
+
+    # processed_path = Path(PROCESSED_DATA_PATH).joinpath("data_processed.csv")
+    # data_processed.to_csv(processed_path, header=True, index=False)
+
+    # print(f"✅ Raw data saved as {RAW_DATA_PATH}")
+    # print(f"✅ Processed data saved as {PROCESSED_DATA_PATH}")
+    # print("✅ preprocess() done")
+    # return data_processed
 
 
 def train(min_date:str = '2019-01-01',
-        max_date:str = '2024-12-31',
+        max_date:str = '2023-12-31',
         split_ratio: float = 0.083333333, # represents 1 year of the dataset
         learning_rate=0.0105,
         batch_size = 256,
@@ -204,7 +222,7 @@ def train(min_date:str = '2019-01-01',
             .reset_index(drop=True)
     )
     unique_pairs_10 = unique_pairs.iloc[:3,:]
-    for (county, category) in unique_pairs_10.itertuples(index=False):
+    for (county, category) in unique_pairs.itertuples(index=False):
         print(county)
         print(category)
         data_preproc = data[(data["county"] == county) & (data["category_name"] == category)]
@@ -329,8 +347,6 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
         df_pred['sin_MoSold'] = np.sin(2*np.pi*df_pred.num_month/month_in_year)
         df_pred['cos_MoSold'] = np.cos(2*np.pi*df_pred.num_month/month_in_year)
         df_pred = df_pred.drop('num_month', axis=1)
-        columnas_target = df_pred[["bottles_sold"]].copy()
-        columnas_apoyo = df_pred[['category_name','county','sin_MoSold','cos_MoSold']].copy()
 
         df_processed,col_names = preprocess_features(df_pred,False)
         print("✅ Data Proccesed ")
@@ -360,10 +376,6 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
 
         # Extract MinMaxScaler from the pipeline
         scaler_target = num_pipe.named_steps['minmaxscaler']
-
-        # Extract only the scaler parameters for 'bottles_sold' (last column)
-        min_bottles = scaler_target.min_[-1]
-        scale_bottles = scaler_target.scale_[-1]
 
         print("Min bottles_sold:", scaler_target.data_min_)
         print("Max bottles_sold:", scaler_target.data_max_)
@@ -468,7 +480,7 @@ def prepare_data_to_visualization():
     return dummy_data_df
 
 if __name__ == '__main__':
-    #data = get_data()
+    data = get_data()
     #preprocess(data)
     #train()
     #print(pred(X_val))

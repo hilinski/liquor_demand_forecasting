@@ -16,3 +16,4 @@ PRED_DATA_PATH = Path(ROOT_DIR).joinpath("data","pred")
 
 BUCKET_NAME = os.environ.get("BUCKET_NAME")
 MODEL_LOCAL_PATH = Path(ROOT_DIR).joinpath("model")
+PROCESOR_LOCAL_PATH = Path(ROOT_DIR).joinpath("preprocessors")
