@@ -7,7 +7,7 @@ from pathlib import Path
 from dateutil.parser import parse
 import seaborn as sns
 import matplotlib.pyplot as plt
-from pivottablejs import pivot_ui
+# from pivottablejs import pivot_ui
 from google.cloud import bigquery
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -221,6 +221,21 @@ def pred(df_train, df_test, category_name):
     df_consolidado['category_name'] = category_name
     return df_consolidado
 
+def prepare_data_to_visualization():
+    df = get_data(cache_path = RAW_DATA_ARIMA_PATH)
+    df_demand = preprocess(df)
+    df_final = pd.DataFrame()
+    # category_name = 'RUM'
+    for category_name in ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS']:
+        print(f"Empezando entrenamiento de {category_name}")
+        df_train, df_test = train(df_demand,category_name)
+        df_consolidado = pred(df_train, df_test, category_name)
+        df_final = pd.concat([df_final, df_consolidado], axis=0)
+        
+    print(df_final)
+    
+    return df_final
+        
 if __name__ == '__main__':
     df = get_data(cache_path = RAW_DATA_ARIMA_PATH)
     df_demand = preprocess(df)

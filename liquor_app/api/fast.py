@@ -1,7 +1,8 @@
 import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from liquor_app.interface.main import prepare_data_to_visualization
+# from liquor_app.interface.main import prepare_data_to_visualization
+from arima.amain import prepare_data_to_visualization
 
 from datetime import datetime
 import numpy as np
