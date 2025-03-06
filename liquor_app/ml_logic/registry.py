@@ -33,7 +33,7 @@ from liquor_app.params import *
 #    print("✅ Results saved locally")
 
 
-def save_model(model: keras.Model = None) -> None:
+def save_model(model: keras.Model = None, county='POLK', category='RUM') -> None:
     """
     Persist trained model locally on the hard drive at f"{LOCAL_REGISTRY_PATH}/models/{timestamp}.h5"
     - if MODEL_TARGET='gcs', also persist it in your bucket on GCS at "models/{timestamp}.h5" --> unit 02 only
@@ -42,8 +42,10 @@ def save_model(model: keras.Model = None) -> None:
 
     timestamp = time.strftime("%Y%m%d-%H%M%S")
 
+
+
     # Save model locally
-    model_path = os.path.join(MODEL_LOCAL_PATH, "models", f"{timestamp}.h5")
+    model_path = os.path.join(MODEL_LOCAL_PATH, "models", f"{county}-{category}.h5")
     model.save(model_path)
 
     print("✅ Model saved locally")
@@ -64,7 +66,7 @@ def save_model(model: keras.Model = None) -> None:
     return None
 
 
-def load_model(stage="Production") -> keras.Model:
+def load_model(stage="Production", county = "Black Hawk", category = "GIN") -> keras.Model:
     """
     Return a saved model:
     - locally (latest one in alphabetical order)
@@ -80,18 +82,40 @@ def load_model(stage="Production") -> keras.Model:
 
         # Get the latest model version name by the timestamp on disk
         local_model_directory = os.path.join(MODEL_LOCAL_PATH, "models")
-        local_model_paths = glob.glob(f"{local_model_directory}/*")
+        local_model_paths = glob.glob(f"{local_model_directory}/*.h5")  # Ensure only .h5 models are selected
 
         if not local_model_paths:
-            return None
+            return None  # No models found
 
-        most_recent_model_path_on_disk = sorted(local_model_paths)[-1]
+        # Convert county and category to uppercase (to match filename format)
+        search_pattern = f"{county.upper()}-{category.upper()}"
 
-        print(f"\nLoad latest model from disk...")
+        # Search for the matching model path
+        latest_model_path = None
+        for model_path in local_model_paths:
+            filename = os.path.basename(model_path)  # Extract only the filename
 
-        latest_model = keras.models.load_model(most_recent_model_path_on_disk)
+            if search_pattern in filename:  # Check if county-category name exists in filename
+                latest_model_path = model_path  # Store the latest matching model
+                break  # Stop after finding the first match
 
-        print("✅ Model loaded from local disk")
+        if latest_model_path:
+            print(f"\nLoading model from: {latest_model_path}...")
+            latest_model = keras.models.load_model(latest_model_path)
+            print("✅ Model loaded from local disk")
+            return latest_model
+
+        print(f"❌ Model not found for: {search_pattern}")
+        return None  # Ensure we return None only if no model was found
+
+
+        #most_recent_model_path_on_disk = sorted(local_model_paths)[-1]
+
+       #print(f"\nLoad latest model from disk...")
+
+        #latest_model = keras.models.load_model(most_recent_model_path_on_disk)
+
+        #print("✅ Model loaded from local disk")
 
         return latest_model
 

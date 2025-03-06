@@ -12,8 +12,10 @@ from dateutil.parser import parse
 from liquor_app.params import *
 from liquor_app.ml_logic.data import get_data_with_cache, clean_data, load_data_to_bq
 from liquor_app.ml_logic.model import initialize_model, compile_model, train_model, evaluate_model
-from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre, create_sequences_inference
+from liquor_app.ml_logic.preprocessor import preprocess_features, create_sequences_padre, create_sequences_inference,create_sequences, create_sequences_inference_2
 from liquor_app.ml_logic.registry import load_model, save_model#, save_results
+import joblib
+import pickle
 
 past_steps = 52
 future_steps = 12
@@ -122,8 +124,10 @@ def preprocess(data) -> None:
     data['sin_MoSold'] = np.sin(2*np.pi*data.num_month/month_in_year)
     data['cos_MoSold'] = np.cos(2*np.pi*data.num_month/month_in_year)
     data = data.drop('num_month', axis=1)
+    data["bottles_sold"] = np.log1p(data["bottles_sold"])
     columnas_target = data[["bottles_sold"]]
     columnas_apoyo = data[['category_name','county','sin_MoSold','cos_MoSold']]
+    print("Data shape a procesar", data.shape)
     data_processed,col_names = preprocess_features(data,True)
     print("✅ Data Proccesed ")
 
@@ -156,7 +160,7 @@ def train(min_date:str = '2019-01-01',
         batch_size = 256,
         patience = 10,
         future_steps = future_steps
-    ) -> float:
+    ):
 
     """
     - Download processed data from your BQ table (or from cache if it exists)
@@ -192,60 +196,116 @@ def train(min_date:str = '2019-01-01',
     columnas_target = data[["bottles_sold"]].copy()
     columnas_apoyo = data[['category_name','county','sin_MoSold', 'cos_MoSold']].copy()
 
-    data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
-    data_preproc = data_preproc.drop('remainder__date_week', axis=1)
-    print(f"creando secuencias para modelo RNN...")
-    X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=past_steps, future_steps=future_steps)
-    print("✅ Secuencias creadas ")
-
-    split_index = int((1-split_ratio) * len(X))
-    X_train, X_val = X[:split_index], X[split_index:]
-    y_train, y_val = y[:split_index], y[split_index:]
-    print("✅ Train/Val Split created ")
-
-    print("Input shape X train completo:", X_train.shape)
-    print("Input shape y train completo:", y_train.shape)
-    print("Input shape X train[1:]:", X_train.shape[1:])
-    print("Input shape X val completo:", X_val.shape)
-    print("Input shape y train completo:",y_train.shape)
-    print("Input shape y val completo:",y_val.shape)
-
-    print(f"inicializando modelo")
-    model = initialize_model(input_shape=X_train.shape[1:], future_steps=future_steps)
-    model = compile_model(model, learning_rate=learning_rate)
-
-    print("✅ Model compiled succesfully")
-
-    model,history = train_model(
-        model,
-        X_train,
-        y_train,
-        batch_size=batch_size,
-        patience=patience,
-        validation_data=(X_val, y_val)
+    ########## ENTRENAIENTO DE VARIOS MODELOS  ####################
+    unique_pairs = (
+            data[['county', 'category_name']]
+            .drop_duplicates()
+            .dropna()
+            .reset_index(drop=True)
     )
+    unique_pairs_10 = unique_pairs.iloc[:3,:]
+    for (county, category) in unique_pairs_10.itertuples(index=False):
+        print(county)
+        print(category)
+        data_preproc = data[(data["county"] == county) & (data["category_name"] == category)]
+        print(data_preproc.info())
+        data_preproc = data_preproc.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
+        # Sort by date to maintain time order
+        data_preproc = data_preproc.sort_values(by="remainder__date_week").reset_index(drop=True)
+        data_preproc = data_preproc.drop('remainder__date_week', axis=1)
+        print(data_preproc.info())
+        print(data_preproc.shape)
+        print(f"creando secuencias para county={county} y category = {category}")
+        X, y = create_sequences(data_preproc, past_steps=past_steps, future_steps=future_steps)
+        print("✅ Secuencias creadas ")
+        split_index = int((1-split_ratio) * len(X))
+        X_train, X_val = X[:split_index], X[split_index:]
+        y_train, y_val = y[:split_index], y[split_index:]
+        print("✅ Train/Val Split created ")
+        print("Input shape X train completo:", X_train.shape)
+        print("Input shape y train completo:", y_train.shape)
+        print("Input shape X val completo:", X_val.shape)
+        print("Input shape y val completo:",y_val.shape)
+        print(f"inicializando modelo")
+        model = initialize_model(input_shape=X_train.shape[1:], future_steps=future_steps)
+        model = compile_model(model, learning_rate=learning_rate)
+        print("✅ Model compiled succesfully")
 
-    if 'val_mae' in history.history:
-        val_mae = np.min(history.history['val_mae'])
-    else:
-        val_mae = np.min(history.history['val_loss'])  # Use validation loss instead
+        model,history = train_model(
+            model,
+            X_train,
+            y_train,
+            batch_size=batch_size,
+            patience=patience,
+            validation_data=(X_val, y_val)
+        )
+        if 'val_mae' in history.history:
+            val_mae = np.min(history.history['val_mae'])
+        else:
+            val_mae = np.min(history.history['val_loss'])  # Use validation loss instead
 
-    print("val_mae:", val_mae)
+        print("val_mae:", val_mae)
 
-    # params = dict(
-    #     context="train",
-    #     row_count=len(X_train),
+        # Save model weight on the hard drive (and optionally on GCS too!)
+        save_model(model=model, county=county, category=category)
+
+        print("✅ train() done \n")
+
+        #return val_mae, X_val
+
+
+    # data_preproc = data.iloc[:,:-(len(columnas_target.columns)+len(columnas_apoyo.columns))]
+    # data_preproc = data_preproc.drop('remainder__date_week', axis=1)
+    # print(f"creando secuencias para modelo RNN...")
+    # X, y = create_sequences_padre(data_preproc, columnas_target, past_steps=past_steps, future_steps=future_steps)
+    # print("✅ Secuencias creadas ")
+
+    # split_index = int((1-split_ratio) * len(X))
+    # X_train, X_val = X[:split_index], X[split_index:]
+    # y_train, y_val = y[:split_index], y[split_index:]
+    # print("✅ Train/Val Split created ")
+
+    # print("Input shape X train completo:", X_train.shape)
+    # print("Input shape y train completo:", y_train.shape)
+    # print("Input shape X val completo:", X_val.shape)
+    # print("Input shape y val completo:",y_val.shape)
+
+    # print(f"inicializando modelo")
+    # model = initialize_model(input_shape=X_train.shape[1:], future_steps=future_steps)
+    # model = compile_model(model, learning_rate=learning_rate)
+
+    # print("✅ Model compiled succesfully")
+
+    # model,history = train_model(
+    #     model,
+    #     X_train,
+    #     y_train,
+    #     batch_size=batch_size,
+    #     patience=patience,
+    #     validation_data=(X_val, y_val)
     # )
 
-    # Save results on the hard drive using taxifare.ml_logic.registry
-    #save_results(params=params, metrics=dict(mae=val_mae))
+    # if 'val_mae' in history.history:
+    #     val_mae = np.min(history.history['val_mae'])
+    # else:
+    #     val_mae = np.min(history.history['val_loss'])  # Use validation loss instead
 
-    # Save model weight on the hard drive (and optionally on GCS too!)
-    save_model(model=model)
+    # print("val_mae:", val_mae)
 
-    print("✅ train() done \n")
+    # # params = dict(
+    # #     context="train",
+    # #     row_count=len(X_train),
+    # # )
 
-    return val_mae, X_val
+    # # Save results on the hard drive using taxifare.ml_logic.registry
+    # #save_results(params=params, metrics=dict(mae=val_mae))
+
+    # # Save model weight on the hard drive (and optionally on GCS too!)
+    # save_model(model=model)
+
+    # print("✅ train() done \n")
+
+    # return val_mae, X_val
 
 
 def evaluate(*args) -> float:
@@ -261,6 +321,7 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
             cache_path=Path(RAW_DATA_PATH).joinpath("data.csv"),
             data_has_header=True
         )
+
         df_pred = data.query(f"date_week >= '2024-01-01' and date_week <= '2024-12-31'")
         month_in_year = 12
         df_pred['date_week'] = pd.to_datetime(df_pred['date_week'])
@@ -268,7 +329,9 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
         df_pred['sin_MoSold'] = np.sin(2*np.pi*df_pred.num_month/month_in_year)
         df_pred['cos_MoSold'] = np.cos(2*np.pi*df_pred.num_month/month_in_year)
         df_pred = df_pred.drop('num_month', axis=1)
-        print(" ✅ df_pred shape before process:", df_pred.shape)
+        columnas_target = df_pred[["bottles_sold"]].copy()
+        columnas_apoyo = df_pred[['category_name','county','sin_MoSold','cos_MoSold']].copy()
+
         df_processed,col_names = preprocess_features(df_pred,False)
         print("✅ Data Proccesed ")
 
@@ -276,105 +339,119 @@ def pred(X_pred:np.ndarray = None,  past_steps=past_steps, future_steps=future_s
             df_processed,
             columns=col_names
         )
+
         print(" ✅ df_pred shape after process:", df_processed.shape)
         df_processed = df_processed.drop('remainder__date_week', axis=1)
+
         for columns in df_processed.columns:
             df_processed[columns] = df_processed[columns].astype(float)
 
         df_processed.columns = df_processed.columns.str.replace(" ", "_")
-        print("df_processed info columns: ", df_processed.info())
 
-        X_pred = create_sequences_inference(df_processed, past_steps=past_steps)
-        print("✅ Create Sequences complete ")
-        print(f"{X_pred[0][0]=}")
-
-        print(f"cargando modelo")
-        model = load_model()
-        assert model is not None
-        print(f"modelo cargado")
-        y_pred = model.predict(X_pred)
-        print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
-        print("type of y_pred:" , type(y_pred))
-
-        # 1. Get unique country-category pairs
-        unique_pairs = df_pred[['county', 'category_name']].drop_duplicates().reset_index(drop=True)
-
-        print("✅ Step 1 completed ")
+        columnas_apoyo = df_pred[['category_name','county','sin_MoSold','cos_MoSold']].copy()
+        df_processed_all = pd.concat([df_processed, columnas_apoyo], axis="columns", sort=False)
 
 
-        # 2. Create a DataFrame for predictions
-        last_date = df_pred['date_week'].max()  # Get last available date
-        future_dates = pd.date_range(start=last_date + pd.Timedelta(weeks=1), periods=future_steps, freq='W')
-        #print(f"{last_date=}")
-        #print(f"{future_dates=}")
-        #print(len(future_dates))
+        # Load the saved preprocessor
+        with open("preprocessor.pkl", "rb") as f:
+            preprocessor = pickle.load(f)
+        # Extract the numeric transformer pipeline
+        num_pipe = preprocessor.named_transformers_['num_preproc']
 
-        print("✅ Step 2 completed ")
+        # Extract MinMaxScaler from the pipeline
+        scaler_target = num_pipe.named_steps['minmaxscaler']
 
-        # Create a DataFrame to store predictions
-        predictions_df = pd.DataFrame()
+        # Extract only the scaler parameters for 'bottles_sold' (last column)
+        min_bottles = scaler_target.min_[-1]
+        scale_bottles = scaler_target.scale_[-1]
 
-        # 3. Fill the DataFrame with predictions
-        for i, (county, category) in enumerate(unique_pairs.itertuples(index=False)):
-            temp_df = pd.DataFrame({
-                'date_week': future_dates,  # Assign future dates
+        print("Min bottles_sold:", scaler_target.data_min_)
+        print("Max bottles_sold:", scaler_target.data_max_)
+
+
+        ## Generate unique pairs of combination for county and category
+        unique_pairs = (
+            df_processed_all[['county', 'category_name']]
+            .drop_duplicates()
+            .dropna()
+            .reset_index(drop=True)
+        )
+        unique_pairs_10 = unique_pairs.iloc[:3,:]
+
+        final_predictions = pd.DataFrame()  # List to store predictions for all counties and categories
+
+        for (county, category) in unique_pairs_10.itertuples(index=False):
+            data_aux = df_processed_all[(df_processed_all["county"] == county) & (df_processed_all["category_name"] == category)]
+            data_aux = data_aux.iloc[:,:-(len(columnas_apoyo.columns))]
+
+            print(data_aux.info())
+            print(data_aux.shape)
+            print(f" ✅ Creando secuencias para county={county} y category = {category}")
+
+            X_pred = create_sequences_inference_2(data_aux, past_steps=past_steps)
+            print("✅ Secuencias creadas ")
+
+            print(f"cargando modelo")
+            model = load_model(county=county, category=category)
+            assert model is not None
+            print(f"modelo cargado")
+
+            y_pred = model.predict(X_pred)
+            print("\n✅ prediction done: ", y_pred.shape, "\n")
+
+            print("Shape of y_pred before inverse transform:", y_pred.shape)
+            print("Raw model predictions (before inverse transform):", y_pred[:10])
+
+            ## Get back to normal scale the predictions
+            # Select only the bottles_sold column
+            # Reshape `y_pred` to match expected shape (12, 1)
+            print("Shape of y_pred before transpose:", y_pred.shape)
+            print("Shape of y_pred after transpose:", y_pred.T.shape)
+            # Manually rescale only `bottles_sold`
+            y_pred_original = (y_pred.T * (scaler_target.data_max_[-1] - scaler_target.data_min_[-1])) + scaler_target.data_min_[-1]
+
+            print("Shape of y_pred_original:", y_pred_original.shape)
+            print("First few predictions after rescaling:", y_pred_original[:10])
+            # Reverse the log transformation if applied
+            y_pred_original = np.expm1(y_pred_original)
+
+            # Get last available date
+            last_date = df_pred['date_week'].max()
+            future_dates = pd.date_range(start=last_date + pd.Timedelta(weeks=1), periods=future_steps, freq='W')
+
+            # Convert predictions into a DataFrame
+            predictions_df = pd.DataFrame({
+                'date_week': np.tile(future_dates, y_pred.shape[0]),  # Repeat dates for all sequences
                 'county': county,
                 'category_name': category,
-                'bottles_sold': y_pred[i]  # Get the corresponding predictions
+                'bottles_sold': y_pred_original.flatten()  # Ensure correct shape for concatenation
             })
-            print(f"{i=}")
-            print(f"{(county, category)}")
-            print(f"{temp_df=}")
-            predictions_df = pd.concat([predictions_df, temp_df])
 
-        print("✅ Step 3 completed ")
+            # Combine all predictions into a single DataFrame
+            final_predictions = pd.concat([final_predictions, predictions_df], ignore_index=True)
 
 
-        # 4. Append predictions to raw data
+        print("Final predictions after transform:", final_predictions)
         df_pred_filter = df_pred[['date_week','county', 'category_name','bottles_sold']].copy()
         df_pred_filter["is_predict"] = False
-        predictions_df["is_predict"] = True
-        df_combined = pd.concat([df_pred_filter, predictions_df], ignore_index=True)
-
-        print("✅ Step 4 completed ")
-
-        # 5. Sort by date for visualization
-        #df_combined = df_combined.sort_values(by=['county', 'category_name', 'date_week'])
-
-        print("✅ Step 5 completed ")
-
-        print("✅  DF Combined Output:")
-        print(df_combined.head(10))
+        final_predictions["is_predict"] = True
 
         aux = data.query(f"date_week >= '2024-01-01' and date_week <= '2025-01-31' ").copy()
         aux["is_predict"] = False
         aux_real = aux[aux['date_week']>="2025-01-01"]
         y_real = aux_real[['date_week','county', 'category_name','bottles_sold','is_predict']]
 
-        y_combined = pd.concat([y_real, predictions_df], ignore_index=True)
-        #y_combined = y_combined.sort_values(by=['county', 'category_name', 'date_week'])
+        df_combined = pd.concat([df_pred_filter, y_real, final_predictions], ignore_index=True)
 
-        df_combined = pd.concat([df_combined,y_real], ignore_index=True)
-        print("✅  Y Combined Output:")
-        print(y_combined.head(10))
-        # Store as CSV if the BQ query returned at least one valid line
+        # # Store as CSV if the BQ query returned at least one valid line
         if df_combined.shape[0] > 1:
             df_combined.date_week = pd.to_datetime(df_combined.date_week)
             df_combined.to_csv(Path(PRED_DATA_PATH).joinpath("data.csv"), header=True, index=False, date_format='%Y-%m-%d')
             print(f"df_pred creado en {Path(PRED_DATA_PATH).joinpath('data.csv')} ")
-        return y_combined
+
+        return df_combined
 
 
-    # print(f"cargando modelo")
-    # model = load_model()
-    # assert model is not None
-    # print(f"modelo cargado")
-
-    # print(f"predicting X_pred")
-    # y_pred = model.predict(X_pred)
-
-    # print("\n✅ prediction done: ", y_pred, y_pred.shape, "\n")
-    #return y_pred
 
 def prepare_data_to_visualization():
     data = get_data_with_cache(
@@ -393,7 +470,7 @@ def prepare_data_to_visualization():
 if __name__ == '__main__':
     #data = get_data()
     #preprocess(data)
-    train()
+    #train()
     #print(pred(X_val))
     pred(past_steps=past_steps, future_steps=future_steps)
     #data = prepare_data_to_visualization()

@@ -6,7 +6,7 @@ import datetime
 
 from sklearn.pipeline import make_pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, FunctionTransformer, RobustScaler
+from sklearn.preprocessing import OneHotEncoder, FunctionTransformer, RobustScaler, MinMaxScaler
 
 from liquor_app.ml_logic.encoders import transform_numeric_features
 
@@ -33,9 +33,7 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
         # NUMERIC PIPE
         numerical_features = ['week_year','week_of_year','bottles_sold']
         #numerical_features = ['week_year','week_of_year']
-        num_pipe = make_pipeline(
-            RobustScaler()
-        )
+        num_pipe = make_pipeline(MinMaxScaler(feature_range=(0.1, 1)))
         # COMBINED PREPROCESSOR
 
         final_preprocessor = ColumnTransformer(
@@ -72,13 +70,14 @@ def preprocess_features(X: pd.DataFrame, is_train:bool) -> tuple:
     return X_processed,col_names
 
 # crear secuencias de RNN
-def create_sequences(df, past_steps=10, future_steps=1):
+def create_sequences(df, past_steps=52, future_steps=12):
     X, y = [], []
-    df_x = df.drop(['bottles_sold'],axis='columns').copy()
-    df_y = df[["bottles_sold"]].copy()
+    df_x = df.copy()  # Keep all columns, including 'num_preproc__bottles_sold'
+    df_y = df[["num_preproc__bottles_sold"]].copy()  # Target variable
+
     for i in range(len(df) - past_steps - future_steps):
-        X.append(df_x.iloc[i : i + past_steps].values)  # Past data
-        y.append(df_y.iloc[i + past_steps : i + past_steps + future_steps]["bottles_sold"].values)  # Future target
+        X.append(df_x.iloc[i : i + past_steps].values)  # Past data (including target)
+        y.append(df_y.iloc[i + past_steps : i + past_steps + future_steps].values)  # Future target
     return np.array(X), np.array(y)
 
 def create_sequences_padre(data_preproc, columnas_target, past_steps=10, future_steps=1):
@@ -94,6 +93,7 @@ def create_sequences_padre(data_preproc, columnas_target, past_steps=10, future_
             for y_item in y_sequence:
                 y.append([y_item])
     return np.array(X), np.array(y)
+
 
 def create_sequences_inference(data_preproc, past_steps=52):
     """
@@ -114,3 +114,20 @@ def create_sequences_inference(data_preproc, past_steps=52):
                 X_pred.append(df_filtrado.iloc[-past_steps:].values)  # Last x weeks
 
     return np.array(X_pred)  # Shape: (num_groups, past_steps, num_features)
+
+def create_sequences_inference_2(data_preproc, past_steps=52):
+    """
+    Create sequences from new unseen data for inference (prediction).
+    Assumes data_preproc contains only one country-category combination.
+    Returns only X_pred (input features), without y.
+    """
+    X_pred = []
+
+    # Ensure that we have at least 'past_steps' weeks of data
+    if len(data_preproc) < past_steps:
+        raise ValueError(f"Not enough data. Need at least {past_steps} weeks, got {len(data_preproc)}")
+
+    # Extract the last 'past_steps' weeks
+    X_pred.append(data_preproc.iloc[-past_steps:].values)
+
+    return np.array(X_pred)  # Shape: (1, past_steps, num_features)
