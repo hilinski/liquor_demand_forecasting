@@ -44,7 +44,8 @@ def get_data(cache_path, min_date='2013-01-01',max_date='2025-01-31'):
         print("\nLoad data from BigQuery server...")
         query = f"""
             with clean_data as (
-                    select * EXCEPT (store_number, zip_code, category, vendor_number, county_number),
+                    select * EXCEPT (date, store_number, zip_code, category, vendor_number, county_number),
+                    DATE_TRUNC(date, MONTH) as date,
                     CAST(store_number AS NUMERIC) as store_number ,
                     CAST(zip_code AS NUMERIC) as zip_code ,
                     CAST(category AS NUMERIC) as category,
@@ -108,7 +109,7 @@ def get_data(cache_path, min_date='2013-01-01',max_date='2025-01-31'):
             ), combinations as (
             SELECT
               *
-              FROM UNNEST(GENERATE_DATE_ARRAY('{min_date}', '{max_date}', INTERVAL 1 DAY)) as date
+              FROM UNNEST(GENERATE_DATE_ARRAY('{min_date}', '{max_date}', INTERVAL 1 MONTH)) as date
               cross join (select distinct category_name from summary) a
               cross join (select distinct county from summary) b
               ), data_combinations as (
@@ -138,8 +139,13 @@ def preprocess(df):
     df = df.copy()
     df['bottles_sold'] = df['bottles_sold'].fillna(0)
     df.date = pd.to_datetime(df.date)
+    #df = df.groupby(['date','category_name']).sum().reset_index()
+    #df = df.groupby([df.date.dt.year, df.date.dt.month, 'category_name']).sum()
+    #df.groupby([df.date.dt.to_period('M'), 'category_name']).sum().reset_index()
     df.set_index(['date'], inplace=True)
-    df_demand = df.resample("ME")[["bottles_sold"]].sum()
+    df['bottles_sold'] = pd.to_numeric(df.bottles_sold)
+    df_demand = df.copy()
+    #df_demand = df.resample("ME")[["category_name","bottles_sold"]].sum()
     df_demand.to_csv(PROCESSED_DATA_ARIMA_PATH, header=True, index=True)
     return df_demand
 
@@ -150,9 +156,12 @@ def train(df_demand,category_name,year=2024):
     m=12
 
     #train test split
+    df_demand = df_demand.query(f"category_name =='{category_name}'")
+    df_demand.drop(columns=['category_name'],inplace=True)
     df_train = df_demand[df_demand.index.year < year].copy()
     df_test = df_demand[(df_demand.index.year >= year) & (df_demand.index.year < year+1)].copy()
 
+    print(df_train.info())
     #stationarity
     df_demand_diff = df_train.diff().dropna()
     adf_test(df_demand_diff)
@@ -187,9 +196,10 @@ def pred(category_name,year):
     df_demand = pd.read_csv(PROCESSED_DATA_ARIMA_PATH, header='infer')
     df_demand.date = pd.to_datetime(df_demand.date)
     df_demand.set_index(['date'], inplace=True)
-    df_demand = df_demand.resample("ME")[["bottles_sold"]].sum()
+    df_demand = df_demand.query(f"category_name=='{category_name}'")
 
     #train test split
+    df_demand.drop(columns=['category_name'],inplace=True)
     df_train = df_demand[df_demand.index.year < year].copy()
     df_test = df_demand[(df_demand.index.year >= year) & (df_demand.index.year < year+1)].copy()
 
