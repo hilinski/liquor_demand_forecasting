@@ -177,7 +177,7 @@ def train(df_demand,category_name,year=2024):
     #autoregression
     p = 6
 
-    model = SARIMAX(df_demand_diff2, order=(p,0,q), seasonal_order=(1,1,1,m))
+    model = SARIMAX(df_demand_diff2, order=(p,0,q), seasonal_order=(1,1,1,m), freq='MS')
     sarima_result = model.fit(maxiter=1000)
     print(f"Model trained for category {category_name} for year {year}!")
 
@@ -208,8 +208,10 @@ def pred(category_name,year):
     forecast_diff2_values = forecast_diff2.predicted_mean
 
     # Create forecast index for the next 12 months
-    forecast_index = pd.date_range(start=df_train.index[-1] + pd.DateOffset(months=1),
-                                   periods=12, freq="M")
+    forecast_index = pd.date_range(start=df_train.index[-1], periods=13, freq="M")
+
+    #forecast_index = pd.date_range(start=df_train.index[-1] + pd.DateOffset(months=1),
+    #                               periods=12, freq="M")
 
     # Reverse the second differencing (d=2 → d=1)
     # The forecast_diff2_values should be added to the last value of the first differenced data
@@ -226,11 +228,12 @@ def pred(category_name,year):
     # Slice to ensure forecast only contains the last 12 values
     forecast_original = forecast_original[-12:]
 
-    #mae = abs(forecast_original.values - df_test.bottles_sold.values[:-1]).mean()
-    #print(f"MAE for {category_name}: {mae}")
+
+    mae = abs(forecast_original.values - df_test.bottles_sold.values).mean()
+    print(f"MAE for {category_name}: {mae}")
 #
-    #mre = abs((forecast_original.values - df_test.bottles_sold.values[:-1])/df_test.bottles_sold.values[:-1]).mean()
-    #print(f"MRE for {category_name}: {mre}")
+    mre = abs((forecast_original.values - df_test.bottles_sold.values)/df_test.bottles_sold.values).mean()
+    print(f"MRE for {category_name}: {mre}")
 
     df_pred = forecast_original.to_frame().reset_index()
     df_pred.rename(columns={'index':'date','predicted_mean':'bottles_sold'}, inplace=True)
@@ -240,7 +243,11 @@ def pred(category_name,year):
     df_consolidado = pd.concat([df_pred,df_train],axis=0)
     df_consolidado = df_consolidado.reset_index()
     df_consolidado['category_name'] = category_name
-    return df_consolidado
+
+    df_error = pd.DataFrame({'category_name': [category_name],
+                             'mae': [mae],
+                             'mre': [mre]},index=None)
+    return df_consolidado, df_error
 
 
 def train_all(all_categories = ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS'], year = 2024):
@@ -254,12 +261,18 @@ def train_all(all_categories = ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEUR
 
 def prepare_data_to_visualization(all_categories = ['RUM','VODKA','WHISKY','TEQUILA_MEZCAL','LIQUEURS','GIN','OTROS'], year = 2024):
     df_final = pd.DataFrame()
+    df_error_final = pd.DataFrame()
     for category_name in all_categories:
-        df_consolidado = pred(category_name, year)
+        df_consolidado, df_error = pred(category_name, year)
         df_final = pd.concat([df_final, df_consolidado], axis=0)
-    return df_final
+        df_error_final = pd.concat([df_error_final, df_error], axis=0)
+    real_df = df_final.query('is_pred == False')
+    last_real_df = real_df[real_df.date == max(real_df.date)]
+    last_real_df['is_pred'] = True
+    df_final = pd.concat([df_final,last_real_df],axis=0)
+    return df_final, df_error_final
 
 if __name__ == '__main__':
     #train_all(year=2024)
-    df_final = prepare_data_to_visualization()
+    df_final, df_error_final = prepare_data_to_visualization()
     print(df_final)
