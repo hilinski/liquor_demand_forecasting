@@ -22,16 +22,17 @@ app.add_middleware(
 
 @app.get("/predict")
 def predict():   
-    data = prepare_data_to_visualization()
-
-    json_data = data.to_json(orient='records')
-    return  json_data 
+    data_df, data_mae = prepare_data_to_visualization()
+    json_data = data_df.to_json(orient='records')
+    json_mae = data_mae.to_json(orient='records')
+    return  json_data, json_mae
 
 @app.get('/pred-year')
 def pred_year(year_pred: int):
-    data = prepare_data_to_visualization(year=year_pred)
-    json_data = data.to_json(orient='records')
-    return  json_data 
+    data_df, data_mae = prepare_data_to_visualization(year=year_pred)
+    json_data = data_df.to_json(orient='records')
+    json_mae = data_mae.to_json(orient='records') 
+    return  json_data, json_mae
     # return { "endpoit " : f'{year_pred}'}
  
     
