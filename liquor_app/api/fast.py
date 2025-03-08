@@ -27,6 +27,14 @@ def predict():
     json_data = data.to_json(orient='records')
     return  json_data 
 
+@app.get('/pred-year')
+def pred_year(year_pred: int):
+    data = prepare_data_to_visualization(year=year_pred)
+    json_data = data.to_json(orient='records')
+    return  json_data 
+    # return { "endpoit " : f'{year_pred}'}
+ 
+    
 @app.get("/")
 def root():
     return { "hello" : "el team del licor"}
